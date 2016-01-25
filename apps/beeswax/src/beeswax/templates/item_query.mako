@@ -27,7 +27,7 @@
 <%namespace name="assist" file="/assist.mako" />
 
 ${ commonheader(_('Query'), app_name, user) | n,unicode }
-${ layout.menubar(section='query') }
+${ layout.menubar(section='item query') }
 
 <div id="temporaryPlaceholder"></div>
 <div id="beeswax-execute">
