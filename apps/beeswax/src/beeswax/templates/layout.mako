@@ -48,7 +48,7 @@
                         <li class="dropdown">
                             <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">对私查询<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
-                                <li><a href="/beeswax">客户信息查询</a></li>
+                                <li><a href="${ url(app_name + ':item_query') }">客户信息查询</a></li>
                                 <li><a href="/beeswax">账户信息查询（旧线）</a></li>
                                 <li><a href="/beeswax">账户信息查询（新线）</a></li>
                                 <li><a href="/beeswax">历史交易查询（旧线）</a></li>
