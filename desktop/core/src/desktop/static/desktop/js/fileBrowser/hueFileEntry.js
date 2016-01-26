@@ -48,7 +48,7 @@
     self.path = self.definition.name;
     self.app = options.app;
 
-    self.activeDocument = ko.observable();
+    self.document = ko.observable();
 
     self.entriesToDelete = ko.observableArray();
 
@@ -85,18 +85,33 @@
     }
   }
 
+  HueFileEntry.prototype.beforeContextOpen = function () {
+    var self = this;
+    if (! self.selected()) {
+      $.each(self.parent.selectedEntries(), function (idx, entry) {
+        entry.selected(false);
+      });
+      self.selected(true);
+    }
+  };
+
   HueFileEntry.prototype.showSharingModal = function () {
     var self = this;
     if (self.selectedEntry()) {
-      if (! self.activeDocument()) {
-        self.activeDocument(new HueDocument({
-          assistHelper: self.assistHelper,
-          fileEntry: self
-        }));
-        self.activeDocument().load();
+      if (! self.selectedEntry().document()) {
+        self.selectedEntry().loadDocument();
       }
       $('#shareDocumentModal').modal('show');
     }
+  };
+
+  HueFileEntry.prototype.loadDocument = function () {
+    var self = this;
+    self.document(new HueDocument({
+      assistHelper: self.assistHelper,
+      fileEntry: self
+    }));
+    self.document().load();
   };
 
   /**
@@ -192,24 +207,12 @@
     }
   };
 
-  HueFileEntry.prototype.topMenuDelete = function () {
+  HueFileEntry.prototype.showDeleteConfirmation = function () {
     var self = this;
     if (self.selectedEntries().length > 0 ) {
       self.entriesToDelete(self.selectedEntries());
-    } else {
-      self.entriesToDelete([ self ]);
+      $('#deleteEntriesModal').modal('show');
     }
-    $('#deleteEntriesModal').modal('show');
-  };
-
-  HueFileEntry.prototype.contextMenuDelete = function () {
-    var self = this;
-    if (self.selected()) {
-      self.parent.entriesToDelete(self.parent.selectedEntries());
-    } else {
-      self.parent.entriesToDelete([self]);
-    }
-    $('#deleteEntriesModal').modal('show');
   };
 
   HueFileEntry.prototype.performDelete = function () {

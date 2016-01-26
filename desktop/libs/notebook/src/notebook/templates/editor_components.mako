@@ -323,6 +323,7 @@ ${ require.config() }
             sourceTypes: $root.sqlSourceTypes,
             activeSourceType: $root.activeSqlSourceType,
             navigationSettings: {
+              openDatabase: true,
               openItem: false,
               showPreview: true,
               showStats: true
@@ -471,10 +472,18 @@ ${ require.config() }
 </script>
 
 <script type="text/html" id="editor-snippet-header">
-  <div class="hover-actions inline pull-right" style="font-size: 15px;">
-    <a class="inactive-action" href="javascript:void(0)" data-bind="visible: status() != 'ready' && status() != 'loading' && errors().length == 0, click: function() { $data.showLogs(! $data.showLogs()); window.setTimeout(redrawFixedHeaders, 100); }, css: {'blue': $data.showLogs}" title="${ _('Show Logs') }"><i class="fa fa-file-text-o"></i></a>
+  <div class="hover-actions inline pull-right" style="font-size: 15px; position: relative;">
     <span class="execution-timer" data-bind="visible: type() != 'text' && status() != 'ready' && status() != 'loading', text: result.executionTime().toHHMMSS()"></span>
-    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function(){ settingsVisible(! settingsVisible()) }, visible: hasProperties, css: { 'blue' : settingsVisible }"><i class="fa fa-cog"></i></a>
+    <!-- ko if: availableDatabases().length > 0 -->
+    <a class="inactive-action active-database margin-left-10" data-toggle="dropdown" href="javascript:void(0)"><span data-bind="visible: isSqlDialect, text: database"></span> <i class="fa fa-caret-down"></i></a>
+    <ul class="dropdown-menu" data-bind="foreach: availableDatabases">
+      <li>
+        <a href="javascript:void(0)" data-bind="text: $data, click: function () { $parent.database($data); }"></a>
+      </li>
+    </ul>
+    <!-- /ko -->
+    <a class="inactive-action margin-left-10" href="javascript:void(0)" data-bind="visible: status() != 'ready' && status() != 'loading' && errors().length == 0, click: function() { $data.showLogs(! $data.showLogs()); window.setTimeout(redrawFixedHeaders, 100); }, css: {'blue': $data.showLogs}" title="${ _('Show Logs') }"><i class="fa fa-file-text-o"></i></a>
+    <a class="inactive-action margin-left-10" href="javascript:void(0)" data-bind="click: function(){ settingsVisible(! settingsVisible()) }, visible: hasProperties, css: { 'blue' : settingsVisible }"><i class="fa fa-cog"></i></a>
   </div>
 </script>
 
@@ -1448,7 +1457,7 @@ ${ require.config() }
       });
       $(rawDatum.counts()).each(function (cnt, item) {
         _data.push({
-          label: item[_idxLabel],
+          label: hueUtils.html2text(item[_idxLabel]),
           value: item[_idxValue],
           obj: item
         });
@@ -1517,7 +1526,7 @@ ${ require.config() }
           _data.push({
             lat: item[_idxLat],
             lng: item[_idxLng],
-            label: item[_idxLabel],
+            label: hueUtils.html2text(item[_idxLabel]),
             obj: item
           });
         });
@@ -1557,7 +1566,7 @@ ${ require.config() }
           $(rawDatum.counts()).each(function (cnt, item) {
             _data.push({
               series: _plottedSerie,
-              x: item[_idxLabel],
+              x: hueUtils.html2text(item[_idxLabel]),
               y: item[_idxValue],
               obj: item
             });
@@ -2023,6 +2032,10 @@ ${ require.config() }
           $(".main-content").css("top", "82px");
           %endif
         }
+      });
+
+      viewModel.isLeftPanelVisible.subscribe(function (value) {
+        window.setTimeout(redrawFixedHeaders, 200);
       });
 
       $(document).on("showAuthModal", function (e, data) {
