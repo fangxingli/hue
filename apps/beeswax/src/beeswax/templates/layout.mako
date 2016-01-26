@@ -45,7 +45,14 @@ def is_selected(section, matcher):
                 </a>
               </li>
               <li class="${is_selected(section, 'query')}"><a href="${ url(app_name + ':execute_query') }">${_('Query Editor')}</a></li>
-              <li class="${is_selected(section, 'item query')}"><a href="${ url(app_name + ':item_query') }">${_('Item Query')}</a></li>
+              <li>
+                <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown" class="dropdown-toggle">旧线个人贷款查询<b class="caret"></b></a>
+                <ul role="menu" class="dropdown-menu">
+                    <li class="${is_selected(section, 'query')}"><a href="${ url(app_name + ':execute_query') }">客户信息查询1</a></li>
+                    <li class="${is_selected(section, 'query')}"><a href="${ url(app_name + ':execute_query') }">客户信息查询2</a></li>
+                </ul>
+              </li>
+              <li class="${is_selected(section, 'item query')}"><a href="${ url(app_name + ':item_query') }">旧线个人贷款查询</a></li>
               <li class="${is_selected(section, 'my queries')}"><a href="${ url(app_name + ':my_queries') }">${_('My Queries')}</a></li>
               <li class="${is_selected(section, 'saved queries')}"><a href="${ url(app_name + ':list_designs') }">${_('Saved Queries')}</a></li>
               <li class="${is_selected(section, 'history')}"><a href="${ url(app_name + ':list_query_history') }">${_('History')}</a></li>
