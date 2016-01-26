@@ -46,7 +46,7 @@
                         </li>
                         <li class="${is_selected(section, 'query')}"><a href="${ url(app_name + ':execute_query') }">${_('Query Editor')}</a></li>
                         <li class="dropdown">
-                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">对私查询<b class="caret"></b></a>
+                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">对私查询<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
                                 <li><a href="/beeswax">客户信息查询</a></li>
                                 <li><a href="/beeswax">账户信息查询（旧线）</a></li>
@@ -56,7 +56,7 @@
                             </ul>
                         </li>
                         <li class="dropdown">
-                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">对公查询<b class="caret"></b></a>
+                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">对公查询<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
                                 <li><a href="/beeswax">客户信息查询</a></li>
                                 <li><a href="/beeswax">账户信息查询（旧线）</a></li>
@@ -66,7 +66,7 @@
                             </ul>
                         </li>
                         <li class="dropdown">
-                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">BGL查询<b class="caret"></b></a>
+                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">BGL查询<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
                                 <li><a href="/beeswax">账户信息查询</a></li>
                                 <li><a href="/beeswax">交易信息查询（旧线）</a></li>
@@ -74,14 +74,14 @@
                             </ul>
                         </li>
                         <li class="dropdown">
-                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">旧线个人贷款查询<b class="caret"></b></a>
+                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">旧线个人贷款查询<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
                                 <li><a href="/beeswax">客户信息查询1</a></li>
                                 <li><a href="/beeswax">客户信息查询2</a></li>
                             </ul>
                         </li>
                         <li class="dropdown">
-                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">信用卡<b class="caret"></b></a>
+                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">信用卡<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
                                 <li><a href="/beeswax">账单查询</a></li>
                                 <li><a href="/beeswax">分期数据查询</a></li>
@@ -89,7 +89,7 @@
                             </ul>
                         </li>
                         <li class="dropdown">
-                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">新旧对照<b class="caret"></b></a>
+                            <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown">新旧对照<b class="caret" style="margin-top:0px;"></b></a>
                             <ul role="menu" class="dropdown-menu">
                                 <li><a href="/beeswax">对私新旧账号</a></li>
                                 <li><a href="/beeswax">对公新旧账号</a></li>
@@ -98,7 +98,6 @@
                                 <li><a href="/beeswax">对私新旧机构</a></li>
                             </ul>
                         </li>
-                        <li class="${is_selected(section, 'item query')}"><a href="${ url(app_name + ':item_query') }">旧线个人贷款查询</a></li>
                         <li class="${is_selected(section, 'my queries')}"><a href="${ url(app_name + ':my_queries') }">${_('My Queries')}</a></li>
                         <li class="${is_selected(section, 'saved queries')}"><a href="${ url(app_name + ':list_designs') }">${_('Saved Queries')}</a></li>
                         <li class="${is_selected(section, 'history')}"><a href="${ url(app_name + ':list_query_history') }">${_('History')}</a></li>
