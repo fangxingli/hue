@@ -18,10 +18,10 @@
     from django.utils.translation import ugettext as _
 
     def is_selected(section, matcher):
-  if section == matcher:
-    return "active"
-  else:
-    return ""
+        if section == matcher:
+            return "active"
+        else:
+            return ""
 %>
 
 <%def name="menubar(section='')">
