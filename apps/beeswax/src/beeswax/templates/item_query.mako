@@ -35,37 +35,9 @@ ${ layout.menubar(section='item query') }
   <div class="panel-container">
   <div class="left-panel" id="navigator">
     <ul class="nav nav-tabs" style="margin-bottom: 0">
-      <li class="active"><a href="#navigatorTab" data-toggle="tab" class="sidetab">${_('Assist')}</a></li>
-      <li><a href="#settingsTab" data-toggle="tab" class="sidetab">${_('Settings')} <span data-bind="visible:design.settings.values().length + design.fileResources.values().length + design.functions.values().length > 0, text: design.settings.values().length + design.fileResources.values().length + design.functions.values().length" class="badge badge-info">12</span></a></li>
-      % if app_name == 'impala':
-      <li><a href="#sessionTab" data-toggle="tab" class="sidetab">${_('Session')}</a></li>
-      % endif
+      <li class="active"><a href="#settingsTab" data-toggle="tab" class="sidetab">客户信息查询<span data-bind="visible:design.settings.values().length + design.fileResources.values().length + design.functions.values().length > 0, text: design.settings.values().length + design.fileResources.values().length + design.functions.values().length" class="badge badge-info">12</span></a></li>
     </ul>
-    <div class="tab-content" style=" overflow: hidden;">
-      <div class="tab-pane active" id="navigatorTab">
-        <div class="card card-small card-tab" style="margin-bottom: 0;">
-          <div class="card-body" style="margin-top: 0; height: 100%;">
-            <div class="assist" data-bind="component: {
-              name: 'assist-panel',
-              params: {
-                user: HIVE_AUTOCOMPLETE_USER,
-                onlySql: true,
-                sql: {
-                  sourceTypes: editorViewModel.sqlSourceTypes,
-                  activeSourceType: snippetType,
-                  navigationSettings: {
-                    openItem: false,
-                    showPreview: true,
-                    showStats: true
-                  }
-                },
-                visibleAssistPanels: ['sql']
-              }
-            }"></div>
-          </div>
-        </div>
-      </div>
-      <div class="tab-pane" id="settingsTab">
+      <div class="tab-pane active" id="settingsTab">
         <div class="card card-small card-tab">
           <div class="card-body">
             <div id="advanced-settings">
@@ -281,7 +253,7 @@ ${ layout.menubar(section='item query') }
       <div class="card-body">
         <div class="tab-content">
           <div id="queryPane">
-
+            <!-- 查询编辑器部分   -->
             <div data-bind="css: {'hide': design.errors().length == 0 || design.inlineErrors().length > 0}" class="alert alert-error">
               <!-- ko if: $root.getQueryErrors().length > 0 -->
               <p><strong>${_('Please provide a query')}</strong></p>
