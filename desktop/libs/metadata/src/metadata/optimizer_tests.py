@@ -57,21 +57,77 @@ class TestOptimizerApi(object):
     cls.user.save()
 
 
-  def test_api_create_product(self):
+  def test_create_product(self):
     resp = self.api.create_product()
 
     assert_equal('success', resp['status'], resp)
 
 
-  def test_api_add_email_to_product(self):
+  def test_add_email_to_product(self):
     resp = self.api.add_email_to_product()
 
     assert_equal('success', resp['status'], resp)
 
 
-  def test_api_authenticate(self):
+  def test_authenticate(self):
     resp = self.api.authenticate()
 
     assert_true(resp['token'], resp)
     assert_equal('success', resp['status'], resp)
 
+
+  def test_get_status(self):
+    resp = self.api.authenticate()
+    token = resp['token']
+
+    resp = self.api.get_status(token=token)
+
+    assert_equal('success', resp['status'], resp)
+    assert_true('filesFinished' in resp['details'], resp)
+    assert_true('filesProcessing' in resp['details'], resp)
+    assert_true('finished' in resp['details'], resp)
+
+
+  def test_delete_workload(self):
+    resp = self.api.authenticate()
+    token = resp['token']
+
+    resp = self.api.delete_workload(token=token)
+
+    assert_equal('success', resp['status'], resp)
+
+
+  def test_upload(self):
+    resp = self.api.authenticate()
+    token = resp['token']
+
+    queries = [
+        "select emps.id from emps where emps.name = 'Joe' group by emps.mgr, emps.id;",
+        "select emps.name from emps where emps.num = 007 group by emps.state, emps.name;",
+        "select Part.partkey, Part.name, Part.type from Part where Part.yyprice > 2095",
+        "select Part.partkey, Part.name, Part.mfgr FROM Part WHERE Part.name LIKE '%red';",
+        "select count(*) as loans from account a where a.account_state_id in (5,9);",
+        "select orders.key, orders.id from orders where orders.price < 9999",
+        "select mgr.name from mgr where mgr.reports > 10 group by mgr.state;"
+    ]
+
+    resp = self.api.upload(token=token, queries=queries)
+    assert_equal('success', resp['status'], resp)
+
+
+  def test_top_tables(self):
+    resp = self.api.authenticate()
+    token = resp['token']
+
+    resp = self.api.top_tables(token=token)
+
+    assert_true(isinstance(resp, list), resp) # No status code currently
+
+
+  def test_table_details(self):  # Requires test_upload to run before
+    resp = self.api.authenticate()
+    token = resp['token']
+
+    resp = self.api.table_details(table_name='orders', token=token)
+
+    assert_equal('success', resp['status'], resp)

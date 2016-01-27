@@ -18,14 +18,16 @@
 
 import json
 import logging
+import uuid
 
 from django.utils.translation import ugettext as _
 
+from desktop.lib import export_csvxls
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.rest.http_client import HttpClient, RestException
 from desktop.lib.rest import resource
 
-from metadata.conf import OPTIMIZER
+from metadata.conf import OPTIMIZER, get_optimizer_url
 
 
 LOG = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ _JSON_CONTENT_TYPE = 'application/json'
 
 
 def is_optimizer_enabled():
-  return OPTIMIZER.API_URL.get() and OPTIMIZER.PRODUCT_NAME.get()
+  return get_optimizer_url() and OPTIMIZER.PRODUCT_NAME.get()
 
 
 class OptimizerApiException(Exception):
@@ -45,7 +47,7 @@ class OptimizerApiException(Exception):
 class OptimizerApi(object):
 
   def __init__(self, api_url=None, product_name=None, product_secret=None, ssl_cert_ca_verify=OPTIMIZER.SSL_CERT_CA_VERIFY.get(), product_auth_secret=None):
-    self._api_url = (api_url or OPTIMIZER.API_URL.get()).strip('/')
+    self._api_url = (api_url or get_optimizer_url()).strip('/')
     self._product_name = product_name if product_name else OPTIMIZER.PRODUCT_NAME.get()
     self._product_secret = product_secret if product_secret else OPTIMIZER.PRODUCT_SECRET.get()
     self._product_auth_secret = product_auth_secret if product_auth_secret else OPTIMIZER.PRODUCT_AUTH_SECRET.get()
@@ -56,6 +58,15 @@ class OptimizerApi(object):
     self._client.set_verify(ssl_cert_ca_verify)
 
     self._root = resource.Resource(self._client)
+    self._token = None
+
+
+  def _authenticate(self, force=False):
+    if self._token is None or force:
+      self._token = self.authenticate()['token']
+
+    return self._token
+
 
   def create_product(self, product_name=None, product_secret=None, authCode=None):
     try:
@@ -88,41 +99,86 @@ class OptimizerApi(object):
           'productName': self._product_name,
           'productSecret': self._product_secret,
       }
-      return self._root.post('/api/createProduct', data=json.dumps(data), contenttype=_JSON_CONTENT_TYPE)
+      return self._root.post('/api/authenticate', data=json.dumps(data), contenttype=_JSON_CONTENT_TYPE)
     except RestException, e:
       raise PopupException(e, title=_('Error while accessing Optimizer'))
 
 
-  def delete_workload(self):
+  def delete_workload(self, token, email=None):
     try:
       data = {
-          'email': email,
+          'email': email if email is not None else self._email,
           'token': token,
       }
-      return self._root.post('/api/deleteWorkload', data)
+      return self._root.post('/api/deleteWorkload', data=json.dumps(data), contenttype=_JSON_CONTENT_TYPE)
     except RestException, e:
       raise PopupException(e, title=_('Error while accessing Optimizer'))
 
 
-  def get_status(self):
+  def get_status(self, token, email=None):
     try:
       data = {
-          'email': email,
+          'email': email if email is not None else self._email,
           'token': token,
       }
-      return self._root.post('/api/getStatus', data)
+      return self._root.post('/api/getStatus', data=json.dumps(data), contenttype=_JSON_CONTENT_TYPE)
     except RestException, e:
       raise PopupException(e, title=_('Error while accessing Optimizer'))
 
 
-  def upload(self):
+  def upload(self, queries, token=None, email=None, source_platform='generic'):
+    if token is None:
+      token = self._authenticate()
+
+    try:      
+      content_generator = OptimizerDataAdapter(queries)
+      queries_csv = export_csvxls.create_generator(content_generator, 'csv')
+
+      data = {
+          'email': email if email is not None else self._email,
+          'token': token,
+          'sourcePlatform': source_platform,
+      }
+      return self._root.post('/api/upload', data=data, files = {'file': ('hue-report.csv', list(queries_csv)[0])})
+
+    except RestException, e:
+      raise PopupException(e, title=_('Error while accessing Optimizer'))
+
+
+  def top_tables(self, token=None, email=None):
+    if token is None:
+      token = self._authenticate()
+
     try:
       data = {
-          'email': email,
+          'email': email if email is not None else self._email,
           'token': token,
-          'sourcePlatform': 'generic',
-          'file': 'file'
       }
-      return self._root.post('/api/upload', data)
+      return self._root.post('/api/topTables', data=json.dumps(data), contenttype=_JSON_CONTENT_TYPE)
     except RestException, e:
       raise PopupException(e, title=_('Error while accessing Optimizer'))
+
+
+  def table_details(self, table_name, token=None, email=None):
+    if token is None:
+      token = self._authenticate()
+
+    try:
+      data = {
+          'email': email if email is not None else self._email,
+          'token': token,
+          'tableName': table_name
+      }
+      return self._root.post('/api/tableDetails', data=json.dumps(data), contenttype=_JSON_CONTENT_TYPE)
+    except RestException, e:
+      raise PopupException(e, title=_('Error while accessing Optimizer'))
+
+
+def OptimizerDataAdapter(queries):
+  headers = ['SQL_ID', 'ELAPSED_TIME', 'SQL_FULLTEXT']
+  if queries and len(queries[0]) == 3:
+    rows = queries
+  else:  
+    rows = ([str(uuid.uuid4()), 1000, q] for q in queries)
+
+  yield headers, rows

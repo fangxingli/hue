@@ -199,7 +199,7 @@ ${ require.config() }
         &nbsp;&nbsp;&nbsp;
 
         % if mode == 'editor':
-        <a class="btn" href="${ url('notebook:editor') }?type=${ editor_type }" title="${ _('New %s Query') % editor_type.title() }" rel="tooltip" data-placement="bottom">
+        <a class="btn" href="${ url('notebook:editor') }?type=${ editor_type }&new=true" title="${ _('New %s Query') % editor_type.title() }" rel="tooltip" data-placement="bottom">
           <i class="fa fa-file-o"></i>
         </a>
         % else:
@@ -225,6 +225,9 @@ ${ require.config() }
               % elif editor_type == 'rdbms':
                 <img src="${ static('rdbms/art/icon_rdbms_48.png') }" class="app-icon" />
                 DB Query
+              % elif editor_type == 'pig':
+                <img src="${ static('pig/art/icon_pig_48.png') }" class="app-icon" />
+                Pig
               % else:
                 <img src="${ static('beeswax/art/icon_beeswax_48.png') }" class="app-icon" />
                 Hive
@@ -599,6 +602,7 @@ ${ require.config() }
           snippet: $data,
           openIt: '${ _ko("Alt or Ctrl + Click to open it") }',
           expandStar: '${ _ko("Alt or Ctrl + Click to replace with all columns") }',
+          onBlur: saveTemporarySnippet,
           aceOptions: {
             showLineNumbers: $root.editorMode,
             showGutter: $root.editorMode,
@@ -892,7 +896,7 @@ ${ require.config() }
 </script>
 
 <script type ="text/html" id="snippet-execution-controls">
-  <div class="snippet-actions" style="position: absolute; bottom: 0">
+  <div class="snippet-actions" style="position: absolute; bottom: 0" data-bind="css: {'snippet-actions-compact': !$root.editorMode}">
     <a class="snippet-side-btn" style="cursor: default;" data-bind="visible: status() == 'loading'" title="${ _('Creating session') }">
       <i class="fa fa-fw fa-spinner fa-spin"></i>
     </a>
@@ -1009,8 +1013,8 @@ ${ require.config() }
     <p>${_('Are you sure you want to remove this snippet?')}</p>
   </div>
   <div class="modal-footer" data-bind="with: $root.removeSnippetConfirmation">
-    <a class="btn" data-dismiss="modal" data-bind="click: function() { $root.removeSnippetConfirmation(null); }">${_('No')}</a>
-    <input type="submit" data-dismiss="modal" value="${_('Yes')}" class="btn btn-danger" data-bind="click: function() { notebook.snippets.remove(snippet); window.setTimeout(redrawFixedHeaders, 100); $root.removeSnippetConfirmation(null); }" />
+    <a class="btn" data-bind="click: function() { $root.removeSnippetConfirmation(null); $('#removeSnippetModal').modal('hide'); }">${_('No')}</a>
+    <input type="submit" value="${_('Yes')}" class="btn btn-danger" data-bind="click: function() { notebook.snippets.remove(snippet); window.setTimeout(redrawFixedHeaders, 100); $root.removeSnippetConfirmation(null); $('#removeSnippetModal').modal('hide'); }" />
   </div>
 </div>
 
@@ -1657,6 +1661,12 @@ ${ require.config() }
     return _datum;
   }
 
+  function saveTemporarySnippet($element, value) {
+    if ($element.data('last-active-editor')) {
+      $.totalStorage('hue.notebook.lastWrittenSnippet', value);
+    }
+  }
+
   require([
     "knockout",
     "ko.charts",
@@ -1997,6 +2007,11 @@ ${ require.config() }
       viewModel = new EditorViewModel(${ notebooks_json | n,unicode }, VIEW_MODEL_OPTIONS, i18n);
       ko.applyBindings(viewModel);
       viewModel.init();
+
+      if (viewModel.editorMode && window.location.getParameter('editor') == '' && window.location.getParameter('new') == '') {
+        viewModel.selectedNotebook().snippets()[0].statement_raw($.totalStorage('hue.notebook.lastWrittenSnippet'));
+        $.totalStorage('hue.notebook.lastWrittenSnippet', '');
+      }
 
       if (location.getParameter("github_status") != "") {
         if (location.getParameter("github_status") == "0") {

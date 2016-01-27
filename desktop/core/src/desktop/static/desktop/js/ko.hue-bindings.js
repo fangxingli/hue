@@ -119,6 +119,26 @@
     }
   };
 
+  /**
+   * This binding can be used to toggle a boolean value on click
+   *
+   * Example:
+   *
+   * <div databind="toggle: value">...</div>
+   *
+   * @type {{init: ko.bindingHandlers.toggle.init}}
+   */
+  ko.bindingHandlers.toggle = {
+    init: function (element, valueAccessor, allBindings, viewModel, bindingContext) {
+      var value = valueAccessor();
+      ko.bindingHandlers.click.init(element, function () {
+        return function () {
+          value(! value());
+        }
+      }, allBindings, viewModel, bindingContext);
+    }
+  };
+
   ko.bindingHandlers.slideVisible = {
     init: function (element, valueAccessor) {
       var value = valueAccessor();
@@ -2337,6 +2357,9 @@
       editor.on("blur", function () {
         snippet.inFocus(false);
         snippet.statement_raw(editor.getValue());
+        if (options.onBlur) {
+          options.onBlur($el, editor.getValue());
+        }
       });
 
       var currentAssistTables = {};
