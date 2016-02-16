@@ -361,6 +361,7 @@ class Workflow(Job):
       'namespaces': e.namespaces
     })
 
+    _to_lowercase(node_list)
     adj_list = _create_graph_adjaceny_list(node_list)
 
     node_hierarchy = ['start']
@@ -433,6 +434,17 @@ class Workflow(Job):
     }""")
 
     return data
+
+
+# Updates node_list to lowercase names
+# To avoid case-sensitive failures
+def _to_lowercase(node_list):
+  for node in node_list:
+    node['node_type'] = node['node_type'].lower()
+    node['name'] = node['name'].lower()
+    node['ok_to'] = node['ok_to'].lower()
+    if 'error_to' in node.keys():
+      node['error_to'] = node['error_to'].lower()
 
 def _update_adj_list(adj_list):
   uuids = {}
@@ -575,8 +587,8 @@ def _get_hierarchy_from_adj_list(adj_list, curr_node, node_hierarchy):
     return curr_node
 
   elif adj_list[curr_node]['node_type'] == 'end':
-    node_hierarchy.append(['Kill'])
-    node_hierarchy.append(['End'])
+    node_hierarchy.append(['kill'])
+    node_hierarchy.append(['end'])
     return node_hierarchy
 
   elif adj_list[curr_node]['node_type'] == 'fork':
@@ -704,6 +716,11 @@ def _upgrade_older_node(node):
     node['properties']['cc'] = ''
     node['properties']['subject'] = ''
     node['properties']['body'] = ''
+
+  if node['type'] == 'email-widget' and 'bcc' not in node['properties']:
+    node['properties']['bcc'] = ''
+    node['properties']['content_type'] = 'text/plain'
+    node['properties']['attachment'] = ''
 
 
 class Action(object):
@@ -1492,7 +1509,14 @@ class EmailAction(Action):
      },
      'cc': {
           'name': 'cc',
-          'label': _('Cc addresses (optional)'),
+          'label': _('cc'),
+          'value': '',
+          'help_text': _('Comma-separated values'),
+          'type': 'text'
+     },
+     'bcc': {
+          'name': 'bcc',
+          'label': _('bcc'),
           'value': '',
           'help_text': _('Comma-separated values'),
           'type': 'text'
@@ -1510,6 +1534,20 @@ class EmailAction(Action):
           'value': '',
           'help_text': _('Plain-text'),
           'type': 'textarea'
+     },
+     'attachment': {
+          'name': 'attachment',
+          'label': _('Attachment'),
+          'value': '',
+          'help_text': _('Comma separated list of HDFS files.'),
+          'type': ''
+     },
+     'content_type': {
+          'name': 'content_type',
+          'label': _('Content-type'),
+          'value': 'text/plain',
+          'help_text': _('Default is text/plain'),
+          'type': 'text'
      },
      # Common
      'retry_max': {
@@ -2330,7 +2368,7 @@ class Coordinator(Job):
 
   @property
   def workflow(self):
-    wf_doc = Document2.objects.get(uuid=self.data['properties']['workflow'])
+    wf_doc = Document2.objects.get_by_uuid(uuid=self.data['properties']['workflow'])
     return Workflow(document=wf_doc)
 
   def get_absolute_url(self):

@@ -22,13 +22,14 @@
   }
 }(this, function (ko) {
 
-  var TIME_TO_LIVE_IN_MILLIS = 86400000; // 1 day
+  var TIME_TO_LIVE_IN_MILLIS = $.totalStorage('hue.cacheable.ttl.override') || $.totalStorage('hue.cacheable.ttl'); // 1 day by default, configurable with desktop.custom.cacheable_ttl in the .ini or $.totalStorage('hue.cacheable.ttl.override', 1234567890)
+
   var AUTOCOMPLETE_API_PREFIX = "/notebook/api/autocomplete/";
+  var DOCUMENTS_API = "/desktop/api2/doc/";
+  var DOCUMENTS_SEARCH_API = "/desktop/api2/docs/";
   var HDFS_API_PREFIX = "/filebrowser/view=";
   var HDFS_PARAMETERS = "?pagesize=100&format=json";
-  var DOCUMENTS_API = "/desktop/api2/docs/";
-  var DOCUMENT_API = "/desktop/api2/doc/get";
-
+  var IMPALA_INVALIDATE_API = '/impala/api/invalidate';
 
   /**
    * @param {Object} i18n
@@ -43,6 +44,16 @@
     self.i18n = i18n;
     self.user = user;
     self.lastKnownDatabases = {};
+    self.fetchQueue = {};
+    self.invalidateImpala = false;
+
+    huePubSub.subscribe('assist.clear.db.cache', function (options) {
+      self.clearDbCache(options);
+    });
+
+    huePubSub.subscribe('assist.clear.hdfs.cache', function () {
+      $.totalStorage("hue.assist." + self.getTotalStorageUserPrefix('hdfs'), {});
+    });
   }
 
   AssistHelper.prototype.hasExpired = function (timestamp) {
@@ -118,7 +129,7 @@
    * @returns {boolean} - True if actually an error
    */
   AssistHelper.prototype.successResponseIsError = function (response) {
-    return typeof response !== 'undefined' && (response.status === -1 || response.status === 500);
+    return typeof response !== 'undefined' && (response.status === -1 || response.status === 500 || response.code === 503 || response.code === 500);
   };
 
   /**
@@ -169,24 +180,27 @@
     var self = this;
     var url = HDFS_API_PREFIX + "/" + options.pathParts.join("/") + HDFS_PARAMETERS;
 
-    var fetchFunction = function (successCallback) {
+    var fetchFunction = function (storeInCache) {
       $.ajax({
         dataType: "json",
         url: url,
         success: function (data) {
-          if (!data.error && !self.successResponseIsError(data)) {
-            successCallback(data);
+          if (!data.error && !self.successResponseIsError(data) && typeof data.files !== 'undefined' && data.files !== null) {
+            if (data.files.length > 2) {
+              storeInCache(data);
+            }
+            options.successCallback(data);
           } else {
             self.assistErrorCallback(options)(data);
           }
         }
       })
-        .fail(self.assistErrorCallback(options))
-        .always(function () {
-          if (options.editor) {
-            options.editor.hideSpinner();
-          }
-        });
+      .fail(self.assistErrorCallback(options))
+      .always(function () {
+        if (typeof options.editor !== 'undefined' && options.editor !== null) {
+          options.editor.hideSpinner();
+        }
+      });
     };
 
     fetchCached.bind(self)($.extend({}, options, {
@@ -196,30 +210,60 @@
     }));
   };
 
+  AssistHelper.prototype.getFetchQueue = function (fetchFunction, identifier) {
+    var self = this;
+    if (! self.fetchQueue[fetchFunction]) {
+      self.fetchQueue[fetchFunction] = {};
+    }
+    var queueForFunction = self.fetchQueue[fetchFunction];
+
+    var id = typeof identifier === 'undefined' || identifier === null ? 'DEFAULT_QUEUE' : identifier;
+
+    if (! queueForFunction[id]) {
+      queueForFunction[id] = [];
+    }
+    return queueForFunction[id];
+  };
+
   /**
    * @param {Object} options
    * @param {Function} options.successCallback
    * @param {Function} [options.errorCallback]
    * @param {boolean} [options.silenceErrors]
    *
-   * @param {string} [options.path]
+   * @param {string} [options.uuid]
    */
   AssistHelper.prototype.fetchDocuments = function (options) {
     var self = this;
+
+    var queue = self.getFetchQueue('fetchDocuments', options.uuid);
+    queue.push(options);
+    if (queue.length > 1) {
+      return;
+    }
+
     $.ajax({
       url: DOCUMENTS_API,
       data: {
-        path: options.path
+        uuid: options.uuid
       },
       success: function (data) {
-        if (! self.successResponseIsError(data)) {
-          options.successCallback(data);
-        } else {
-          self.assistErrorCallback(options)(data);
+        while (queue.length > 0) {
+          var next = queue.shift();
+          if (! self.successResponseIsError(data)) {
+            next.successCallback(data);
+          } else {
+            self.assistErrorCallback(next)(data);
+          }
         }
       }
     })
-      .fail(self.assistErrorCallback(options));
+    .fail(function (response) {
+      while (queue.length > 0) {
+        var next = queue.shift();
+        self.assistErrorCallback(next)(response);
+      }
+    });
   };
 
   /**
@@ -229,41 +273,21 @@
    * @param {boolean} [options.silenceErrors]
    *
    * @param {string} [options.path]
-   * @param {string} options.query
+   * @param {string} [options.query]
+   * @param {string} [options.type]
+   * @param {int} [options.page]
+   * @param {int} [options.limit]
    */
   AssistHelper.prototype.searchDocuments = function (options) {
     var self = this;
     $.ajax({
-          url: DOCUMENTS_API,
-          data: {
-            path: options.path,
-            text: options.query
-          },
-          success: function (data) {
-            if (! self.successResponseIsError(data)) {
-              options.successCallback(data);
-            } else {
-              self.assistErrorCallback(options)(data);
-            }
-          }
-        })
-        .fail(self.assistErrorCallback(options));
-  };
-
-  /**
-   * @param {Object} options
-   * @param {Function} options.successCallback
-   * @param {Function} [options.errorCallback]
-   * @param {boolean} [options.silenceErrors]
-   *
-   * @param {number} options.docId
-   */
-  AssistHelper.prototype.fetchDocument = function (options) {
-    var self = this;
-    $.ajax({
-      url: DOCUMENT_API,
+      url: DOCUMENTS_SEARCH_API,
       data: {
-        id: options.docId
+        uuid: options.uuid,
+        text: options.query,
+        type: options.type,
+        page: options.page,
+        limit: options.limit
       },
       success: function (data) {
         if (! self.successResponseIsError(data)) {
@@ -282,13 +306,39 @@
    * @param {Function} [options.errorCallback]
    * @param {boolean} [options.silenceErrors]
    *
-   * @param {string} options.path
+   * @param {number} options.uuid
+   */
+  AssistHelper.prototype.fetchDocument = function (options) {
+    var self = this;
+    $.ajax({
+      url: DOCUMENTS_API,
+      data: {
+        uuid: options.uuid
+      },
+      success: function (data) {
+        if (! self.successResponseIsError(data)) {
+          options.successCallback(data);
+        } else {
+          self.assistErrorCallback(options)(data);
+        }
+      }
+    })
+    .fail(self.assistErrorCallback(options));
+  };
+
+  /**
+   * @param {Object} options
+   * @param {Function} options.successCallback
+   * @param {Function} [options.errorCallback]
+   * @param {boolean} [options.silenceErrors]
+   *
+   * @param {string} options.parentUuid
    * @param {string} options.name
    */
   AssistHelper.prototype.createDocumentsFolder = function (options) {
     var self = this;
     $.post("/desktop/api2/doc/mkdir", {
-      parent_path: ko.mapping.toJSON(options.path),
+      parent_uuid: ko.mapping.toJSON(options.parentUuid),
       name: ko.mapping.toJSON(options.name)
     }, function (data) {
       if (! self.successResponseIsError(data)) {
@@ -297,7 +347,7 @@
         self.assistErrorCallback(options)(data);
       }
     })
-      .fail(self.assistErrorCallback(options));
+    .fail(self.assistErrorCallback(options));
   };
 
   /**
@@ -334,7 +384,7 @@
       contentType: false,
       processData: false
     })
-      .fail(self.assistErrorCallback(options));
+    .fail(self.assistErrorCallback(options));
   };
 
   /**
@@ -349,8 +399,8 @@
   AssistHelper.prototype.moveDocument = function (options) {
     var self = this;
     $.post("/desktop/api2/doc/move", {
-      source_doc_id: ko.mapping.toJSON(options.sourceId),
-      destination_doc_id: ko.mapping.toJSON(options.destinationId)
+      source_doc_uuid: ko.mapping.toJSON(options.sourceId),
+      destination_doc_uuid: ko.mapping.toJSON(options.destinationId)
     }, function (data) {
       if (! self.successResponseIsError(data)) {
         options.successCallback(data);
@@ -358,7 +408,7 @@
         self.assistErrorCallback(options)(data);
       }
     })
-      .fail(self.assistErrorCallback(options));
+    .fail(self.assistErrorCallback(options));
   };
 
   /**
@@ -367,13 +417,13 @@
    * @param {Function} [options.errorCallback]
    * @param {boolean} [options.silenceErrors]
    *
-   * @param {string} options.id
+   * @param {string} options.uuid
    * @param {string} [options.skipTrash] - Default false
    */
   AssistHelper.prototype.deleteDocument = function (options) {
     var self = this;
     $.post("/desktop/api2/doc/delete", {
-      doc_id: ko.mapping.toJSON(options.id),
+      uuid: ko.mapping.toJSON(options.uuid),
       skip_trash: ko.mapping.toJSON(options.skipTrash || false)
     }, function (data) {
       if (! self.successResponseIsError(data)) {
@@ -382,7 +432,7 @@
         self.assistErrorCallback(options)(data);
       }
     })
-      .fail(self.assistErrorCallback(options));
+    .fail(self.assistErrorCallback(options));
   };
 
   /**
@@ -394,8 +444,9 @@
    * @param {string[]} [options.fields]
    * @param {boolean} [options.clearAll]
    */
-  AssistHelper.prototype.clearCache = function (options) {
+  AssistHelper.prototype.clearDbCache = function (options) {
     var self = this;
+    self.invalidateImpala = options.sourceType === 'impala' && options.clearAll;
     if (options.clearAll) {
       $.totalStorage("hue.assist." + self.getTotalStorageUserPrefix(options.sourceType), {});
     } else {
@@ -426,27 +477,41 @@
   AssistHelper.prototype.loadDatabases = function (options) {
     var self = this;
 
-    fetchAssistData.bind(self)($.extend({}, options, {
-      url: AUTOCOMPLETE_API_PREFIX,
-      successCallback: function (data) {
-        var databases = data.databases || [];
-        // Blacklist of system databases
-        self.lastKnownDatabases[options.sourceType] = $.grep(databases, function(database) {
-          return database !== "_impala_builtins";
-        });
-        options.successCallback(self.lastKnownDatabases[options.sourceType]);
-      },
-      errorCallback: function (response) {
-        if (response.status == 401) {
-          $(document).trigger("showAuthModal", {'type': options.sourceType, 'callback': function() {
-            self.loadDatabases(options);
-          }});
-          return;
+    var loadFunction = function () {
+      self.invalidateImpala = false;
+      fetchAssistData.bind(self)($.extend({}, options, {
+        url: AUTOCOMPLETE_API_PREFIX,
+        successCallback: function (data) {
+          var databases = data.databases || [];
+          // Blacklist of system databases
+          self.lastKnownDatabases[options.sourceType] = $.grep(databases, function (database) {
+            return database !== "_impala_builtins";
+          });
+          options.successCallback(self.lastKnownDatabases[options.sourceType]);
+        },
+        errorCallback: function (response) {
+          if (response.status == 401) {
+            $(document).trigger("showAuthModal", {
+              'type': options.sourceType, 'callback': function () {
+                self.loadDatabases(options);
+              }
+            });
+            return;
+          }
+          self.lastKnownDatabases[options.sourceType] = [];
+          self.assistErrorCallback(options)(response);
+        },
+        cacheCondition: function (data) {
+          return typeof data !== 'undefined' && data !== null && typeof data.databases !== 'undefined' && data.databases !== null && data.databases.length > 0;
         }
-        self.lastKnownDatabases[options.sourceType] = [];
-        self.assistErrorCallback(options)(response);
-      }
-    }));
+      }));
+    };
+
+    if (options.sourceType === 'impala' && self.invalidateImpala) {
+      $.post(IMPALA_INVALIDATE_API, loadFunction);
+    } else {
+      loadFunction();
+    }
   };
 
   /**
@@ -657,8 +722,23 @@
     var self = this;
     fetchAssistData.bind(self)($.extend({}, options, {
       url: AUTOCOMPLETE_API_PREFIX + options.databaseName,
-      errorCallback: self.assistErrorCallback(options)
+      errorCallback: self.assistErrorCallback(options),
+      cacheCondition: function (data) {
+        return typeof data !== 'undefined' && data !== null && typeof data.tables_meta !== 'undefined' && data.tables_meta !== null && data.tables_meta.length > 0;
+      }
     }));
+  };
+
+  var fieldCacheCondition = function (data) {
+    if (typeof data !== 'undefined' && data !== null) {
+      return (typeof data.item !== 'undefined' && data.item !== null) ||
+          (typeof data.key !== 'undefined' && data.key !== null) ||
+          (typeof data.tables_meta !== 'undefined' && data.tables_meta !== null && data.tables_meta.length > 0) ||
+          (typeof data.extended_columns !== 'undefined' && data.extended_columns !== null && data.extended_columns.length > 0) ||
+          (typeof data.columns !== 'undefined' && data.columns !== null && data.columns.length > 0) ||
+          (typeof data.fields !== 'undefined' && data.fields !== null && data.fields.length > 0)
+    }
+    return false;
   };
 
   /**
@@ -678,7 +758,8 @@
     var fieldPart = options.fields.length > 0 ? "/" + options.fields.join("/") : "";
     fetchAssistData.bind(self)($.extend({}, options, {
       url: AUTOCOMPLETE_API_PREFIX + options.databaseName + "/" + options.tableName + fieldPart,
-      errorCallback: self.assistErrorCallback(options)
+      errorCallback: self.assistErrorCallback(options),
+      cacheCondition: fieldCacheCondition
     }));
   };
 
@@ -695,7 +776,8 @@
     var self = this;
     fetchAssistData.bind(self)($.extend({}, options, {
       url: AUTOCOMPLETE_API_PREFIX + options.hierarchy.join("/"),
-      errorCallback: self.assistErrorCallback(options)
+      errorCallback: self.assistErrorCallback(options),
+      cacheCondition: fieldCacheCondition
     }));
   };
 
@@ -703,6 +785,7 @@
    * @param {Object} options
    * @param {string} options.sourceType
    * @param {string} options.url
+   * @param {Function} options.cacheCondition - Determines whether it should be cached or not
    * @param {Function} options.successCallback
    * @param {Function} options.errorCallback
    * @param {Object} [options.editor] - Ace editor
@@ -713,26 +796,55 @@
       return
     }
 
-    fetchCached.bind(self)($.extend(options, {
-      fetchFunction: function (successCallback) {
-        $.post(options.url, {
-          notebook: {},
-          snippet: ko.mapping.toJSON({
-            type: options.sourceType
-          })
-        }, function (data) {
-          if (data.status === 0) {
-            successCallback(data);
-          } else {
-            options.errorCallback(data);
-          }
-        }).fail(options.errorCallback).always(function () {
-          if (options.editor) {
-            options.editor.hideSpinner();
-          }
-        });
+    var cachedData = $.totalStorage("hue.assist." + self.getTotalStorageUserPrefix(options.sourceType)) || {};
+    if (typeof cachedData[options.url] !== "undefined" && ! self.hasExpired(cachedData[options.url].timestamp)) {
+      options.successCallback(cachedData[options.url].data);
+      return;
+    }
+    if (typeof options.editor !== 'undefined' && options.editor !== null) {
+      options.editor.showSpinner();
+    }
+
+    var queue = self.getFetchQueue('fetchAssistData', options.sourceType + '_' + options.url);
+    queue.push(options);
+    if (queue.length > 1) {
+      return;
+    }
+
+    $.post(options.url, {
+      notebook: {},
+      snippet: ko.mapping.toJSON({
+        type: options.sourceType
+      })
+    }, function (data) {
+      // Safe to assume all requests in the queue have the same cacheCondition
+      if (data.status === 0 && !self.successResponseIsError(data) && options.cacheCondition(data)) {
+        cachedData[options.url] = {
+          timestamp: (new Date()).getTime(),
+          data: data
+        };
+        $.totalStorage("hue.assist." + self.getTotalStorageUserPrefix(options.sourceType), cachedData);
       }
-    }));
+      while (queue.length > 0) {
+        var next = queue.shift();
+        if (data.status === 0 && !self.successResponseIsError(data)) {
+          next.successCallback(data);
+        } else {
+          next.errorCallback(data);
+        }
+        if (typeof next.editor !== 'undefined' && next.editor !== null) {
+          next.editor.hideSpinner();
+        }
+      }
+    }).fail(function (data) {
+      while (queue.length > 0) {
+        var next = queue.shift();
+        next.errorCallback(data);
+        if (typeof next.editor !== 'undefined' && next.editor !== null) {
+          next.editor.hideSpinner();
+        }
+      }
+    });
   };
 
   /**
@@ -749,7 +861,7 @@
     var cachedData = $.totalStorage("hue.assist." + self.getTotalStorageUserPrefix(options.sourceType)) || {};
 
     if (typeof cachedData[options.url] == "undefined" || self.hasExpired(cachedData[options.url].timestamp)) {
-      if (options.editor) {
+      if (typeof options.editor !== 'undefined' && options.editor !== null) {
         options.editor.showSpinner();
       }
       options.fetchFunction(function (data) {
@@ -758,7 +870,6 @@
           data: data
         };
         $.totalStorage("hue.assist." + self.getTotalStorageUserPrefix(options.sourceType), cachedData);
-        options.successCallback(data);
       });
     } else {
       options.successCallback(cachedData[options.url].data);

@@ -39,11 +39,11 @@ from desktop.views import _ko
 
 <script src="${ static('desktop/ext/js/markdown.min.js') }"></script>
 <script src="${ static('desktop/ext/js/jquery/plugins/jquery.hotkeys.js') }"></script>
-<script src="${ static('desktop/ext/js/jquery/plugins/jquery.kinetic.min.js') }"></script>
+<script src="${ static('desktop/ext/js/jquery/plugins/jquery.mousewheel.min.js') }"></script>
 
 <script src="${ static('desktop/ext/js/bootstrap-editable.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/chosen/chosen.jquery.min.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/ext/js/vkbeautify.js') }" type="text/javascript" charset="utf-8"></script>
+<script src="${ static('desktop/js/vkbeautify.js') }" type="text/javascript" charset="utf-8"></script>
 
 <script src="${ static('desktop/js/hue.geo.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/hue.colors.js') }" type="text/javascript" charset="utf-8"></script>
@@ -337,7 +337,7 @@ ${ require.config() }
       }"></div>
   </div>
   <div class="resizer" data-bind="visible: $root.isLeftPanelVisible() && $root.assistAvailable(), splitDraggable : { appName: 'notebook', leftPanelVisible: $root.isLeftPanelVisible }"><div class="resize-bar">&nbsp;</div></div>
-  <div class="right-panel" data-bind="event: { scroll: function(){ $(document).trigger('hideAutocomplete'); } }">
+  <div class="right-panel" data-bind="event: { scroll: function(){ $(document).trigger('hideAutocomplete'); } }, perfectScrollbar: { enable: $root.editorMode }">
     <div>
       <div class="row-fluid row-container sortable-snippets" data-bind="css: {'is-editing': $root.isEditing},
         sortable: {
@@ -352,10 +352,10 @@ ${ require.config() }
             'greedy': true,
             'stop': function(event, ui) {
               var $element = $(event.target);
-              $element.find('.snippet-body').slideDown('fast', function () { $(window).scrollTop(lastWindowScrollPosition); });
+              $element.find('.snippet-body').slideDown('fast', function () { $('.right-panel').scrollTop(lastWindowScrollPosition); });
             },
             'helper': function(event) {
-              lastWindowScrollPosition = $(window).scrollTop();
+              lastWindowScrollPosition = $('.right-panel').scrollTop();
               var $element = $(event.target);
               $element.find('.snippet-body').slideUp('fast', function () {
                 $('.sortable-snippets').sortable('refreshPositions')
@@ -380,7 +380,7 @@ ${ require.config() }
             }
           },
           dragged: function (widget) {
-            $('.snippet-body').slideDown('fast', function () { $(window).scrollTop(lastWindowScrollPosition); });
+            $('.snippet-body').slideDown('fast', function () { $('.right-panel').scrollTop(lastWindowScrollPosition); });
           }
         }">
       </div>
@@ -401,13 +401,16 @@ ${ require.config() }
 </script>
 
 <script type="text/html" id="snippet-log">
-  <div class="snippet-log-container" data-bind="slideVisible: showLogs" style="display: none;">
+  <div class="snippet-log-container" data-bind="slideVisible: showLogs, onComplete: function(){ redrawFixedHeaders(200); }" style="display: none;">
     <div data-bind="delayedOverflow, css: resultsKlass" style="margin-top: 5px; position: relative;">
       <ul data-bind="visible: jobs().length > 0, foreach: jobs" class="unstyled jobs-overlay">
         <li><a data-bind="text: $.trim($data.name), attr: { href: $data.url }" target="_blank"></a></li>
       </ul>
       <pre data-bind="visible: result.logs().length == 0" class="logs logs-bigger">${ _('No logs available at this moment.') }</pre>
-      <pre data-bind="visible: result.logs().length > 0, text: result.logs, logScroller: result.logs" class="logs logs-bigger"></pre>
+      <pre data-bind="visible: result.logs().length > 0, text: result.logs, logScroller: result.logs" class="logs logs-bigger logs-populated"></pre>
+    </div>
+    <div class="snippet-log-resizer" data-bind="visible: result.logs().length > 0, logResizer: {parent: '.snippet-log-container', target: '.logs-populated', onStart: hideFixedHeaders, onResize: function(){ hideFixedHeaders(); redrawFixedHeaders(500); }}">
+      <i class="fa fa-ellipsis-h"></i>
     </div>
   </div>
   <div class="snippet-log-container">
@@ -431,33 +434,74 @@ ${ require.config() }
 
 <script type="text/html" id="query-history">
   <!-- ko if: $root.editorMode -->
-  <div class="query-history-container" data-bind="slideVisible: $parent.showHistory" style="display: none;">
+  <div class="query-history-container" data-bind="slideVisible: $parent.showHistory, onComplete: function(){ redrawFixedHeaders(200); }" style="display: none;">
     <div data-bind="delayedOverflow, css: resultsKlass" style="margin-top: 5px; position: relative;">
-      <!-- ko if: $parent.history().length > 0 -->
-      <table class="table table-condensed">
-        <thead>
-          <tr>
-            <th colspan="2" class="muted">
-              ${ _('Query history') } &nbsp;
-              <span class="inactive-action">
-                <a href="#clearHistoryModal" title="${_('Clear the query history')}" rel="tooltip" class="snippet-icon" data-toggle="modal">
-                  <i class="fa fa-calendar-times-o"></i>
-                </a>
-              </span>
-            </th>
-          </tr>
-        </thead>
-        <tbody data-bind="foreach: $parent.history">
-          <tr class="pointer" data-bind="click: function() { if (getSelection().toString().length == 0) { location.href=url; } }">
-            <td><code data-bind="text: query" style="white-space: normal"></code></td>
-            <td style="width: 200px" class="muted"><span data-bind="text: moment(lastExecuted).fromNow(), attr: {title: moment(lastExecuted).format('LLL')}"></span></td>
-            <td style="width: 25px" class="muted">
-              <i class="fa fa-bolt inactive-action" data-bind="css: {'fa-fighter-jet': status == 'running', 'fa-cloud-download': status == 'available'}, attr: {'title': status}"></i>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <!-- /ko -->
+      <ul class="nav nav-tabs">
+        <li class="active" data-bind="click: function(){ currentQueryTab('queryHistory'); }">
+          <a class="inactive-action" href="#queryHistory" data-toggle="tab">${_('Query History')}
+            <div class="inline-block inactive-action margin-left-10 hand" title="${_('Clear the query history')}" data-target="#clearHistoryModal" data-toggle="modal" rel="tooltip"><i class="snippet-icon fa fa-calendar-times-o"></i></div>
+          </a>
+        </li>
+        <li data-bind="click: function(){ currentQueryTab('savedQueries'); }"><a class="inactive-action" href="#savedQueries" data-toggle="tab">${_('Saved Queries')}</a></li>
+      </ul>
+      <div class="tab-content" style="border: none">
+        <div class="tab-pane active" id="queryHistory">
+          <!-- ko if: $parent.history().length === 0 -->
+          <div class="margin-top-20 margin-left-10" style="font-style: italic">${ _("No queries to be shown.") }</div>
+          <!-- /ko -->
+          <!-- ko if: $parent.history().length > 0 -->
+          <table class="table table-condensed margin-top-10">
+            <tbody data-bind="foreach: $parent.history">
+              <tr class="pointer" data-bind="click: function() { if (getSelection().toString().length == 0) { location.href=url; } }">
+                <td style="width: 100px" class="muted" data-bind="style:{'border-top-width': $index()==0 ? '0' : ''}"><span data-bind="text: moment(lastExecuted).fromNow(), attr: {title: moment(lastExecuted).format('LLL')}"></span></td>
+                <td style="width: 25px" class="muted" data-bind="style:{'border-top-width': $index()==0 ? '0' : ''}">
+                  <i class="fa fa-bolt inactive-action" data-bind="css: {'fa-fighter-jet': status == 'running', 'fa-cloud-download': status == 'available'}, attr: {'title': status}"></i>
+                </td>
+                <td data-bind="style:{'border-top-width': $index()==0 ? '0' : ''}"><code data-bind="text: query" style="white-space: normal"></code></td>
+              </tr>
+            </tbody>
+          </table>
+          <!-- /ko -->
+        </div>
+
+        <div class="tab-pane" id="savedQueries">
+          <!-- ko spinner: loadingQueries --><!-- /ko -->
+          <!-- ko if: queriesHasErrors() -->
+          <div class="margin-top-20 margin-left-10" style="font-style: italic">${ _("Error loading my queries") }</div>
+          <!-- /ko -->
+          <!-- ko if: ! queriesHasErrors() && ! loadingQueries() && queries().length === 0 -->
+          <div class="margin-top-20 margin-left-10" style="font-style: italic">${ _("You don't have any saved query.") }</div>
+          <!-- /ko -->
+          <!-- ko if: ! queriesHasErrors() && ! loadingQueries() && queries().length > 0 -->
+          <table class="table table-condensed margin-top-10">
+            <thead>
+              <tr>
+                <th style="width: 16%">${ _("Name") }</th>
+                <th style="width: 50%">${ _("Description") }</th>
+                <th style="width: 18%">${ _("Owner") }</th>
+                <th style="width: 16%">${ _("Last Modified") }</th>
+              </tr>
+            </thead>
+            <tbody data-bind="foreach: queries">
+            <tr>
+              <td style="width: 16%"><a data-bind="text: name, attr: { 'href': absoluteUrl }"></a></td>
+              <td style="width: 50%"><span data-bind="text: description"></span></td>
+              <td style="width: 18%"><span data-bind="text: owner"></span></td>
+              <td style="width: 16%"><span data-bind="text: last_modified"></span></td>
+            </tr>
+            </tbody>
+          </table>
+          <div class="pagination" data-bind="visible: queriesTotalPages() > 1">
+            <ul>
+              <li data-bind="css: { 'disabled' : queriesCurrentPage() === 1 }"><a href="javascript: void(0);" data-bind="click: prevQueriesPage">${ _("Prev") }</a></li>
+              <li class="active"><span data-bind="text: queriesCurrentPage() + '/' + queriesTotalPages()"></span></li>
+              <li data-bind="css: { 'disabled' : queriesCurrentPage() === queriesTotalPages() }"><a href="javascript: void(0);" data-bind="click: nextQueriesPage">${ _("Next") }</a></li>
+            </ul>
+          </div>
+          <!-- /ko -->
+        </div>
+      </div>
+
     </div>
   </div>
   <!-- /ko -->
@@ -466,10 +510,10 @@ ${ require.config() }
 <script type="text/html" id="notebook-snippet-header">
   <div class="inactive-action hover-actions inline"><span class="inactive-action" data-bind="css: { 'empty-title': name() === '' }, editable: name, editableOptions: { emptytext: '${_ko('My Snippet')}', mode: 'inline', enabled: true, placement: 'right' }" style="border:none;color: #DDD"></span></div>
   <div class="hover-actions inline pull-right" style="font-size: 15px;">
-    <a class="inactive-action" href="javascript:void(0)" data-bind="visible: status() != 'ready' && status() != 'loading' && errors().length == 0, click: function() { $data.showLogs(! $data.showLogs()); window.setTimeout(redrawFixedHeaders, 100); }, css: {'blue': $data.showLogs}" title="${ _('Show Logs') }"><i class="fa fa-file-text-o"></i></a>
+    <a class="inactive-action" href="javascript:void(0)" data-bind="visible: status() != 'ready' && status() != 'loading' && errors().length == 0, click: function() { hideFixedHeaders(); $data.showLogs(!$data.showLogs());}, css: {'blue': $data.showLogs}" title="${ _('Show Logs') }"><i class="fa fa-file-text-o"></i></a>
     <span class="execution-timer" data-bind="visible: type() != 'text' && status() != 'ready' && status() != 'loading', text: result.executionTime().toHHMMSS()"></span>
     <a class="inactive-action move-widget" href="javascript:void(0)"><i class="fa fa-arrows"></i></a>
-    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function(){ settingsVisible(! settingsVisible()) }, visible: hasProperties, css: { 'blue' : settingsVisible }"><i class="fa fa-cog"></i></a>
+    <a class="inactive-action" href="javascript:void(0)" data-bind="toggle: settingsVisible, visible: hasProperties, css: { 'blue' : settingsVisible }"><i class="fa fa-cog"></i></a>
     <a class="inactive-action" href="javascript:void(0)" data-bind="click: function(){ $root.removeSnippet($parent, $data); }"><i class="fa fa-times"></i></a>
   </div>
 </script>
@@ -478,20 +522,20 @@ ${ require.config() }
   <div class="hover-actions inline pull-right" style="font-size: 15px; position: relative;">
     <span class="execution-timer" data-bind="visible: type() != 'text' && status() != 'ready' && status() != 'loading', text: result.executionTime().toHHMMSS()"></span>
     <!-- ko if: availableDatabases().length > 0 -->
-    <a class="inactive-action active-database margin-left-10" data-toggle="dropdown" href="javascript:void(0)"><span data-bind="visible: isSqlDialect, text: database"></span> <i class="fa fa-caret-down"></i></a>
-    <ul class="dropdown-menu" data-bind="foreach: availableDatabases">
-      <li>
-        <a href="javascript:void(0)" data-bind="text: $data, click: function () { $parent.database($data); }"></a>
-      </li>
-    </ul>
+    <a class="inactive-action active-database margin-left-10" href="javascript:void(0)" data-toggle="dropdown" data-bind="toggle: dbSelectionVisible, css: { 'blue': dbSelectionVisible }"><span data-bind="visible: isSqlDialect, text: database"></span> <i class="fa fa-caret-down"></i></a>
+    <div class="dropdown-menu" style="overflow-y: scroll; height: 200px;">
+      <ul class="hue-inner-drop-down" data-bind="foreachVisible: { data: availableDatabases, minHeight: 34, container: '.dropdown-menu' }">
+        <li><a href="javascript:void(0)" data-bind="text: $data, click: function () { $parent.database($data); }"></a></li>
+      </ul>
+    </div>
     <!-- /ko -->
-    <a class="inactive-action margin-left-10" href="javascript:void(0)" data-bind="visible: status() != 'ready' && status() != 'loading' && errors().length == 0, click: function() { $data.showLogs(! $data.showLogs()); window.setTimeout(redrawFixedHeaders, 100); }, css: {'blue': $data.showLogs}" title="${ _('Show Logs') }"><i class="fa fa-file-text-o"></i></a>
-    <a class="inactive-action margin-left-10" href="javascript:void(0)" data-bind="click: function(){ settingsVisible(! settingsVisible()) }, visible: hasProperties, css: { 'blue' : settingsVisible }"><i class="fa fa-cog"></i></a>
+    <a class="inactive-action margin-left-10" href="javascript:void(0)" data-bind="visible: status() != 'ready' && status() != 'loading' && errors().length == 0, click: function() { hideFixedHeaders(); $data.showLogs(!$data.showLogs());}, css: {'blue': $data.showLogs}" title="${ _('Show Logs') }"><i class="fa fa-file-text-o"></i></a>
+    <a class="inactive-action margin-left-10" href="javascript:void(0)" data-bind="toggle: settingsVisible, visible: hasProperties, css: { 'blue' : settingsVisible }"><i class="fa fa-cog"></i></a>
   </div>
 </script>
 
 <script type="text/html" id="snippet">
-  <div data-bind="visibleOnHover: { override: inFocus() || settingsVisible(), selector: '.hover-actions' }">
+  <div data-bind="visibleOnHover: { override: inFocus() || settingsVisible() || dbSelectionVisible(), selector: '.hover-actions' }">
     <div class="snippet-container row-fluid" data-bind="visibleOnHover: { override: $root.editorMode || inFocus, selector: '.snippet-actions' }">
       <div class="snippet card card-widget" data-bind="css: {'notebook-snippet' : ! $root.editorMode, 'editor-mode': $root.editorMode, 'active-editor': inFocus, 'snippet-text' : type() == 'text'}, attr: {'id': 'snippet_' + id()}, clickForAceFocus: ace">
         <div style="position: relative;">
@@ -561,6 +605,10 @@ ${ require.config() }
   <div data-bind="component: { name: 'csv-list-input', params: { value: value, placeholder: typeof placeholder === 'undefined' ? '' : placeholder } }"></div>
 </script>
 
+<script type="text/html" id="property-settings">
+  <div data-bind="component: { name: 'key-value-list-input', params: { values: value, visibleObservable: visibleObservable } }"></div>
+</script>
+
 <script type="text/html" id="property-csv-hdfs-files">
   <div data-bind="component: { name: 'csv-list-input', params: { value: value, inputTemplate: 'property-csv-hdfs-file-input', placeholder: typeof placeholder === 'undefined' ? '' : placeholder } }"></div>
 </script>
@@ -584,7 +632,7 @@ ${ require.config() }
 
         <!-- ko template: { if: typeof properties().files != 'undefined', name: 'property', data: { type: 'csv-hdfs-files', label: '${ _ko('Files') }', value: properties().files, title: '${ _ko('Files to be placed in the working directory of each executor.') }', placeholder: '${ _ko('e.g. file.data') }'}} --><!-- /ko -->
         <!-- ko template: { if: typeof properties().functions != 'undefined', name: 'property', data: { type: 'csv', label: '${ _ko('Functions') }', value: properties().functions, title: '${ _ko('UDFs name and class') }', placeholder: '${ _ko('e.g. myUpper org.hue.udf.MyUpper') }'}} --><!-- /ko -->
-        <!-- ko template: { if: typeof properties().settings != 'undefined', name: 'property', data: { type: 'csv', label: '${ _ko('Settings') }', value: properties().settings, title: '${ _ko('Spark properties') }', placeholder: '${ _ko('e.g. foo=value') }'}} --><!-- /ko -->
+        <!-- ko template: { if: typeof properties().settings != 'undefined', name: 'property', data: { type: 'settings', label: '${ _ko('Settings') }', value: properties().settings, visibleObservable: settingsVisible, title: '${ _ko('Properties') }'}} --><!-- /ko -->
 
         <!-- ko template: { if: typeof properties().parameters != 'undefined', name: 'property', data: { type: 'csv', label: '${ _ko('Parameters') }', value: properties().parameters, title: '${ _ko('Names and values of Pig parameters and options') }', placeholder: '${ _ko('e.g. input /user/data, -param input=/user/data, -optimizer_off SplitFilter, -verbose') }'}} --><!-- /ko -->
         <!-- ko template: { if: typeof properties().hadoopProperties != 'undefined', name: 'property', data: { type: 'csv', label: '${ _ko('Hadoop properties') }', value: properties().hadoopProperties, title: '${ _ko('Name and values of Hadoop properties') }', placeholder: '${ _ko('e.g. mapred.job.queue.name=production, mapred.map.tasks.speculative.execution=false') }'}} --><!-- /ko -->
@@ -875,7 +923,7 @@ ${ require.config() }
 </script>
 
 <script type="text/html" id="snippet-code-resizer">
-  <div class="snippet-code-resizer" data-bind="aceResizer : { ace: ace, target: '.ace-container-resizable' }">
+  <div class="snippet-code-resizer" data-bind="aceResizer : { ace: ace, target: '.ace-container-resizable', onStart: hideFixedHeaders }">
     <i class="fa fa-ellipsis-h"></i>
   </div>
 </script>
@@ -903,9 +951,12 @@ ${ require.config() }
     <a class="snippet-side-btn" data-bind="click: cancel, visible: status() == 'running'" title="${ _('Cancel') }">
       <i class="fa fa-fw fa-stop"></i>
     </a>
-    <a class="snippet-side-btn" data-bind="click: reexecute, visible: $root.editorMode && result && result.handle().has_more, css: {'blue': $parent.history().length == 0 || $root.editorMode, 'disabled': statement() === '' }" title="${ _('Restart from the first statement') }">
+    <a class="snippet-side-btn" data-bind="click: reexecute, visible: $root.editorMode && result.handle() && result.handle().has_more_statements, css: {'blue': $parent.history().length == 0 || $root.editorMode, 'disabled': statement() === '' }" title="${ _('Restart from the first statement') }">
       <i class="fa fa-fw fa-repeat"></i>
     </a>
+    <span data-bind="visible: $root.editorMode && result.statements_count() > 1">
+      <span data-bind="text: result.statement_id() + 1"></span> / <span data-bind="text: result.statements_count()"></span>
+    </span>
     <a class="snippet-side-btn" data-bind="click: execute, visible: status() != 'running' && status() != 'loading', css: {'blue': $parent.history().length == 0 || $root.editorMode, 'disabled': statement() === '' }" title="${ _('Execute or CTRL + ENTER') }">
       <i class="fa fa-fw fa-play"></i>
     </a>
@@ -913,7 +964,7 @@ ${ require.config() }
       <i class="fa fa-fw fa-indent"></i>
     </a>
     <!-- ko if: $root.editorMode -->
-      <a class="snippet-side-btn" data-bind="click: function() { $parent.showHistory(! $parent.showHistory()); window.setTimeout(redrawFixedHeaders, 100); }, css: {'blue': true}" title="${ _('Show query history') }">
+      <a class="snippet-side-btn" data-bind="click: function() { hideFixedHeaders(); $parent.showHistory(!$parent.showHistory()); }, css: {'blue': $parent.showHistory() }" title="${ _('Show query history') }">
         <i class="fa fa-fw fa-history"></i>
       </a>
     <!-- /ko -->
@@ -1014,7 +1065,7 @@ ${ require.config() }
   </div>
   <div class="modal-footer" data-bind="with: $root.removeSnippetConfirmation">
     <a class="btn" data-bind="click: function() { $root.removeSnippetConfirmation(null); $('#removeSnippetModal').modal('hide'); }">${_('No')}</a>
-    <input type="submit" value="${_('Yes')}" class="btn btn-danger" data-bind="click: function() { notebook.snippets.remove(snippet); window.setTimeout(redrawFixedHeaders, 100); $root.removeSnippetConfirmation(null); $('#removeSnippetModal').modal('hide'); }" />
+    <input type="submit" value="${_('Yes')}" class="btn btn-danger" data-bind="click: function() { notebook.snippets.remove(snippet); redrawFixedHeaders(100); $root.removeSnippetConfirmation(null); $('#removeSnippetModal').modal('hide'); }" />
   </div>
 </div>
 
@@ -1290,6 +1341,42 @@ ${ require.config() }
     return _width;
   };
 
+  function createXScrollbar(el) {
+    if ($(el).parents('.dataTables_wrapper').length > 0) {
+      var scrollingRatio = function() { return ($(el).parents('.dataTables_wrapper')[0].scrollWidth - $(el).parents('.dataTables_wrapper').width() / 2) / $(el).parents('.dataTables_wrapper').width(); };
+      if ($(el).parents('.dataTables_wrapper').find('.hue-scrollbar-x-rail').length == 0 && $(el).parents('.dataTables_wrapper').width() < $(el).parents('.dataTables_wrapper')[0].scrollWidth) {
+        var colWidth = $(el).parents('.dataTables_wrapper').find('.jHueTableExtenderClonedContainerColumn').width() + 2;
+        var scrollbarRail = $('<div>');
+        var scrollbar = $('<div>').addClass('hue-scrollbar-x');
+        scrollbar.width(Math.max(20, $(el).parents('.dataTables_wrapper')[0].scrollWidth / $(el).parents('.dataTables_wrapper').width()));
+        scrollbar.appendTo(scrollbarRail);
+        scrollbar.draggable({
+          axis: 'x',
+          containment: 'parent',
+          drag: function () {
+            $(el).parents('.dataTables_wrapper').scrollLeft($(this).position().left * scrollingRatio())
+          }
+        });
+        scrollbarRail.addClass('hue-scrollbar-x-rail').appendTo($(el).parents(".dataTables_wrapper"));
+        scrollbarRail.width($(el).parents(".dataTables_wrapper").width() - colWidth);
+        scrollbarRail.css("marginLeft", (colWidth) + "px");
+        $(el).parents('.dataTables_wrapper').off('mousewheel');
+        $(el).parents('.dataTables_wrapper').on('mousewheel', function (e) {
+          if (e.deltaY > -2 && e.deltaY < 2) {
+            e.preventDefault();
+          }
+          $(el).parents('.dataTables_wrapper').scrollLeft($(el).parents('.dataTables_wrapper').scrollLeft() + e.deltaX * scrollingRatio());
+          $(el).parents('.dataTables_wrapper').find('.hue-scrollbar-x').css('left', $(el).parents('.dataTables_wrapper').scrollLeft() / scrollingRatio());
+        });
+      }
+      else {
+        var colWidth = $(el).parents('.dataTables_wrapper').find('.jHueTableExtenderClonedContainerColumn').width() + 2;
+        $(el).parents('.dataTables_wrapper').find('.hue-scrollbar-x-rail').width($(el).parents(".dataTables_wrapper").width() - colWidth);
+        $(el).parents('.dataTables_wrapper').find('.hue-scrollbar-x').width(Math.max(20, $(el).parents('.dataTables_wrapper')[0].scrollWidth / $(el).parents('.dataTables_wrapper').width()));
+      }
+    }
+  }
+
   function createDatatable(el, snippet, vm) {
     $(el).addClass("dt");
     var DATATABLES_MAX_HEIGHT = 330;
@@ -1307,46 +1394,32 @@ ${ require.config() }
         if (vm.editorMode){
           DATATABLES_MAX_HEIGHT = $(window).height() - $(el).parent().offset().top - 40;
         }
-        $(el).parents(".dataTables_wrapper").jHueTableScroller({
-          maxHeight: DATATABLES_MAX_HEIGHT,
-          heightAfterCorrection: 0
-        });
-
-        $(el).jHueTableExtender({
-          fixedHeader: true,
-          fixedFirstColumn: true,
-          includeNavigator: false,
-          parentId: 'snippet_' + snippet.id(),
-          clonedContainerPosition: "absolute"
-        });
-
-        var originialAttachListeners = $.Kinetic.prototype._attachListeners;
-        $.Kinetic.prototype._attachListeners = function($el, listeners) {
-          var kinetic = this;
-          var altDown = false;
-          $(window).bind("keydown", "alt", function (e) {
-            kinetic.$el.css('cursor', 'move');
-            altDown = true;
+        if (vm.editorMode) {
+          $(el).parents('.dataTables_wrapper').css('overflow-x', 'hidden');
+          $(el).jHueTableExtender({
+            fixedHeader: true,
+            fixedFirstColumn: true,
+            includeNavigator: false,
+            parentId: 'snippet_' + snippet.id(),
+            mainScrollable: '.right-panel',
+            stickToTopPosition: vm.isPlayerMode() ? 48 : 73,
+            clonedContainerPosition: "fixed"
           });
-          $(window).bind("keyup", "alt", function (e) {
-            altDown = false;
-            kinetic.$el.css('cursor', '');
-          });
-          var altDownListener = function (listener) {
-            return function(e) {
-              if (altDown) {
-                listener.apply(this, arguments);
-              }
-            }
-          }
-          listeners.events.inputDown = altDownListener(listeners.events.inputDown);
-          listeners.events.selectStart = altDownListener(listeners.events.selectStart);
-          originialAttachListeners.apply(this, arguments)
+          createXScrollbar(el);
         }
-
-        $('.dataTables_wrapper').kinetic({
-          cursor: ''
-        });
+        else {
+          $(el).parents(".dataTables_wrapper").jHueTableScroller({
+            maxHeight: DATATABLES_MAX_HEIGHT,
+            heightAfterCorrection: 0
+          });
+          $(el).jHueTableExtender({
+            fixedHeader: true,
+            fixedFirstColumn: true,
+            includeNavigator: false,
+            parentId: 'snippet_' + snippet.id(),
+            clonedContainerPosition: "absolute"
+          });
+        }
       },
       "aoColumnDefs": [
         {
@@ -1364,45 +1437,70 @@ ${ require.config() }
       ]
     });
 
-    $(el).parents(".dataTables_wrapper").jHueTableScroller({
-      maxHeight: DATATABLES_MAX_HEIGHT,
-      heightAfterCorrection: 0
-    });
-
-    $(el).jHueTableExtender({
-      fixedHeader: true,
-      fixedFirstColumn: true,
-      includeNavigator: false,
-      parentId: 'snippet_' + snippet.id(),
-      clonedContainerPosition: "absolute"
-    });
+    if (vm.editorMode) {
+      $(el).parents('.dataTables_wrapper').css('overflow-x', 'hidden');
+      $(el).jHueTableExtender({
+        fixedHeader: true,
+        fixedFirstColumn: true,
+        includeNavigator: false,
+        parentId: 'snippet_' + snippet.id(),
+        mainScrollable: '.right-panel',
+        stickToTopPosition: vm.isPlayerMode() ? 48 : 73,
+        clonedContainerPosition: "fixed"
+      });
+      createXScrollbar(el);
+    }
+    else {
+      $(el).parents(".dataTables_wrapper").jHueTableScroller({
+        maxHeight: DATATABLES_MAX_HEIGHT,
+        heightAfterCorrection: 0
+      });
+      $(el).jHueTableExtender({
+        fixedHeader: true,
+        fixedFirstColumn: true,
+        includeNavigator: false,
+        parentId: 'snippet_' + snippet.id(),
+        clonedContainerPosition: "absolute"
+      });
+    }
     $(".dataTables_filter").hide();
     var dataTableEl = $(el).parents(".dataTables_wrapper");
 
-    dataTableEl.bind('mousewheel DOMMouseScroll wheel', function (e) {
-      if ($(el).closest(".results").css("overflow") == "hidden") {
-        return;
-      }
-      var _e = e.originalEvent,
-          _deltaX = _e.wheelDeltaX || -_e.deltaX,
-          _deltaY = _e.wheelDeltaY || -_e.deltaY;
-      this.scrollTop += -_deltaY / 2;
-      this.scrollLeft += -_deltaX / 2;
+    if (!vm.editorMode) {
+      dataTableEl.bind('mousewheel DOMMouseScroll wheel', function (e) {
+        if ($(el).closest(".results").css("overflow") == "hidden") {
+          return;
+        }
+        var _e = e.originalEvent,
+            _deltaX = _e.wheelDeltaX || -_e.deltaX,
+            _deltaY = _e.wheelDeltaY || -_e.deltaY;
+        this.scrollTop += -_deltaY / 2;
+        this.scrollLeft += -_deltaX / 2;
 
-      if (this.scrollTop == 0) {
-        $("body")[0].scrollTop += -_deltaY / 3;
-        $("html")[0].scrollTop += -_deltaY / 3; // for firefox
-      }
-      e.preventDefault();
-    });
+        if (this.scrollTop == 0) {
+          $("body")[0].scrollTop += -_deltaY / 3;
+          $("html")[0].scrollTop += -_deltaY / 3; // for firefox
+        }
+        e.preventDefault();
+      });
+    }
 
     var _scrollTimeout = -1;
-    dataTableEl.on("scroll", function () {
-      var _lastScrollPosition = dataTableEl.data("scrollPosition") != null ? dataTableEl.data("scrollPosition") : 0;
+
+    var scrollElement = dataTableEl;
+    if (vm.editorMode) {
+      scrollElement = $('.right-panel');
+    }
+
+    scrollElement.on("scroll", function () {
+      var _lastScrollPosition = scrollElement.data("scrollPosition") != null ? scrollElement.data("scrollPosition") : 0;
       window.clearTimeout(_scrollTimeout);
-      dataTableEl.data("scrollPosition", dataTableEl.scrollTop());
+      scrollElement.data("scrollPosition", scrollElement.scrollTop());
       _scrollTimeout = window.setTimeout(function () {
-        if (_lastScrollPosition != dataTableEl.scrollTop() && dataTableEl.scrollTop() + dataTableEl.outerHeight() + 20 > dataTableEl[0].scrollHeight && _dt && snippet.result.hasMore()) {
+        if (vm.editorMode){
+          _lastScrollPosition--; //hack for forcing fetching
+        }
+        if (_lastScrollPosition != scrollElement.scrollTop() && scrollElement.scrollTop() + scrollElement.outerHeight() + 20 >= scrollElement[0].scrollHeight && _dt && snippet.result.hasMore()) {
           dataTableEl.animate({opacity: '0.55'}, 200);
           snippet.fetchResult(100, false);
         }
@@ -1663,7 +1761,12 @@ ${ require.config() }
 
   function saveTemporarySnippet($element, value) {
     if ($element.data('last-active-editor')) {
-      $.totalStorage('hue.notebook.lastWrittenSnippet', value);
+      try {
+        %if editor_type:
+        $.totalStorage('hue.notebook.lastWrittenSnippet.${user}.${editor_type}', value);
+        %endif
+      }
+      catch (e){} // storage quota exceeded with enormous editor content
     }
   }
 
@@ -1794,19 +1897,50 @@ ${ require.config() }
 
     window.importExternalNotebook = importExternalNotebook;
 
-    var redrawFixedHeaders = function () {
-      viewModel.notebooks().forEach(function (notebook) {
-        notebook.snippets().forEach(function (snippet) {
-          var _el = $("#snippet_" + snippet.id()).find(".resultTable");
-          _el.jHueTableExtender({
-            fixedHeader: true,
-            fixedFirstColumn: true,
-            includeNavigator: false,
-            parentId: 'snippet_' + snippet.id(),
-            clonedContainerPosition: "absolute"
+    var hideFixedHeaders = function() {
+      $(".jHueTableExtenderClonedContainer").hide();
+      $(".jHueTableExtenderClonedContainerColumn").hide();
+      $(".jHueTableExtenderClonedContainerCell").hide();
+    };
+
+    window.hideFixedHeaders = hideFixedHeaders;
+
+    var redrawFixedHeaders = function (timeout) {
+      var renderer = function() {
+        viewModel.notebooks().forEach(function (notebook) {
+          notebook.snippets().forEach(function (snippet) {
+            var _el = $("#snippet_" + snippet.id()).find(".resultTable");
+            if (viewModel.editorMode) {
+              _el.jHueTableExtender({
+                fixedHeader: true,
+                fixedFirstColumn: true,
+                includeNavigator: false,
+                mainScrollable: '.right-panel',
+                stickToTopPosition: viewModel.isPlayerMode() ? 48 : 73,
+                parentId: 'snippet_' + snippet.id(),
+                clonedContainerPosition: "fixed"
+              });
+              createXScrollbar(_el);
+            }
+            else {
+              _el.jHueTableExtender({
+                fixedHeader: true,
+                fixedFirstColumn: true,
+                includeNavigator: false,
+                parentId: 'snippet_' + snippet.id(),
+                clonedContainerPosition: "absolute"
+              });
+            }
           });
         });
-      });
+      }
+      if (timeout){
+        window.setTimeout(renderer, timeout);
+      }
+      else {
+        renderer();
+      }
+      $('.right-panel').jHueScrollUp();
     };
 
     window.redrawFixedHeaders = redrawFixedHeaders;
@@ -1826,10 +1960,12 @@ ${ require.config() }
       }, 100);
     }
 
-    function replaceAce (content) {
+    function replaceAce(content) {
       var snip = viewModel.notebooks()[0].snippets()[0];
-      snip.statement_raw(content);
-      snip.ace().setValue(content);
+      if (snip) {
+        snip.statement_raw(content);
+        snip.ace().setValue(content);
+      }
       hideHoverMsg(viewModel);
     }
 
@@ -1930,6 +2066,7 @@ ${ require.config() }
       }
       catch (e) {
         hideHoverMsg(viewModel);
+        replaceAce(raw);
       }
     }
 
@@ -2008,9 +2145,9 @@ ${ require.config() }
       ko.applyBindings(viewModel);
       viewModel.init();
 
-      if (viewModel.editorMode && window.location.getParameter('editor') == '' && window.location.getParameter('new') == '') {
-        viewModel.selectedNotebook().snippets()[0].statement_raw($.totalStorage('hue.notebook.lastWrittenSnippet'));
-        $.totalStorage('hue.notebook.lastWrittenSnippet', '');
+      if (viewModel.editorMode && window.location.getParameter('type') != '' && window.location.getParameter('new') == '') {
+        viewModel.selectedNotebook().snippets()[0].statement_raw($.totalStorage('hue.notebook.lastWrittenSnippet.${user}.' + window.location.getParameter('type')));
+        $.totalStorage('hue.notebook.lastWrittenSnippet.${user}.' + window.location.getParameter('type'), '');
       }
 
       if (location.getParameter("github_status") != "") {
@@ -2050,8 +2187,15 @@ ${ require.config() }
       });
 
       viewModel.isLeftPanelVisible.subscribe(function (value) {
-        window.setTimeout(redrawFixedHeaders, 200);
+        redrawFixedHeaders(200);
       });
+
+      if (viewModel.editorMode) {
+        viewModel.selectedNotebook().snippets()[0].variables.subscribe(function (newValue) {
+          hideFixedHeaders();
+          redrawFixedHeaders(200);
+        });
+      }
 
       $(document).on("showAuthModal", function (e, data) {
         viewModel.authSessionUsername('${ user.username }');

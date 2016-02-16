@@ -51,7 +51,7 @@
     self.assistDbSource = assistDbSource;
     self.parent = parent;
     self.filter = filter;
-    self.isSearchVisible = ko.observable(false);
+    self.isSearchVisible = assistDbSource.isSearchVisible;
     self.editingSearch = ko.observable(false);
 
     self.expandable = typeof definition.type === "undefined" || /table|view|struct|array|map/i.test(definition.type);
@@ -138,6 +138,11 @@
     var self = this;
     self.isSearchVisible(!self.isSearchVisible());
     self.editingSearch(self.isSearchVisible());
+  };
+
+  AssistDbEntry.prototype.triggerRefresh = function () {
+    var self = this;
+    huePubSub.publish('assist.db.refresh', self.assistDbSource.type);
   };
 
   AssistDbEntry.prototype.loadEntries = function() {

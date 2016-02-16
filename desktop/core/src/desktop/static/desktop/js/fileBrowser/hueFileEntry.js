@@ -31,6 +31,7 @@
    * @param {AssistHelper} options.assistHelper
    * @param {Object} options.definition
    * @param {Function} options.activeEntry - The observable keeping track of the current open directory
+   * @param {Function} options.trashEntry - The observable keeping track of the trash directory
    * @param {HueFolder} options.parent
    * @param {string} options.app - Currently only 'documents' is supported
    *
@@ -39,16 +40,37 @@
   function HueFileEntry (options) {
     var self = this;
     self.activeEntry = options.activeEntry;
+    self.trashEntry = options.trashEntry;
     self.parent = options.parent;
-    self.definition = options.definition;
+    self.definition = ko.observable(options.definition);
     self.assistHelper = options.assistHelper;
-    self.name = self.definition.name.substring(self.definition.name.lastIndexOf('/') + 1);
-    self.isRoot = self.name === '';
-    self.isDirectory = self.definition.type === 'directory';
-    self.path = self.definition.name;
     self.app = options.app;
 
     self.document = ko.observable();
+
+    self.isTrash = ko.pureComputed(function () {
+      return self.definition().name === '.Trash';
+    });
+
+    self.isTrashed = ko.pureComputed(function () {
+      if (typeof self.parent !== 'undefined' && self.parent !== null) {
+        return self.parent.isTrash() || self.parent.isTrashed();
+      }
+      return false;
+    });
+
+    self.isRoot = ko.pureComputed(function () {
+      return self.definition().name === '';
+    });
+
+    self.isDirectory = ko.pureComputed(function () {
+      return self.definition().type === 'directory';
+    });
+
+    self.isShared = ko.pureComputed(function () {
+      var perms = self.definition().perms;
+      return perms && (perms.read.users.length || perms.read.groups.length || perms.write.users.length || perms.write.groups.length);
+    });
 
     self.entriesToDelete = ko.observableArray();
 
@@ -77,12 +99,15 @@
       return null;
     });
 
-    self.breadcrumbs = [];
-    var lastParent = self.parent;
-    while (lastParent) {
-      self.breadcrumbs.unshift(lastParent);
-      lastParent = lastParent.parent;
-    }
+    self.breadcrumbs = ko.pureComputed(function () {
+      var result = [];
+      var lastParent = self.parent;
+      while (lastParent) {
+        result.unshift(lastParent);
+        lastParent = lastParent.parent;
+      }
+      return result;
+    });
   }
 
   HueFileEntry.prototype.beforeContextOpen = function () {
@@ -95,8 +120,23 @@
     }
   };
 
-  HueFileEntry.prototype.showSharingModal = function () {
+  HueFileEntry.prototype.showNewDirectoryModal = function () {
     var self = this;
+    if (! self.isTrash() && ! self.isTrashed()) {
+      $('#createDirectoryModal').modal('show');
+    }
+  }
+
+  HueFileEntry.prototype.showSharingModal = function (entry) {
+    var self = this;
+    if (entry) {
+      $.each(self.selectedEntries(), function (idx, otherEntry) {
+        if (otherEntry !== entry) {
+          otherEntry.selected(false);
+        }
+      });
+      entry.selected(true);
+    }
     if (self.selectedEntry()) {
       if (! self.selectedEntry().document()) {
         self.selectedEntry().loadDocument();
@@ -122,7 +162,7 @@
     if (self.app === "documents") {
       var moveNext = function () {
         if (entries.length > 0) {
-          var nextId = entries.shift().definition.id;
+          var nextId = entries.shift().definition().uuid;
           self.assistHelper.moveDocument({
             successCallback: function () {
               moveNext();
@@ -131,7 +171,7 @@
               self.activeEntry().load();
             },
             sourceId: nextId,
-            destinationId: self.definition.id
+            destinationId: self.definition().uuid
           });
         } else {
           if (self !== self.activeEntry()) {
@@ -147,10 +187,10 @@
   HueFileEntry.prototype.search = function (query) {
     var self = this;
 
-    var owner = self.definition.isSearchResult ? self.parent : self;
+    var owner = self.definition().isSearchResult ? self.parent : self;
 
     if (! query) {
-      if (self.definition.isSearchResult) {
+      if (self.definition().isSearchResult) {
         self.activeEntry(self.parent);
       }
       return;
@@ -158,6 +198,7 @@
 
     var resultEntry = new HueFileEntry({
       activeEntry: self.activeEntry,
+      trashEntry: self.trashEntry,
       assistHelper: self.assistHelper,
       definition: {
         isSearchResult: true,
@@ -172,19 +213,27 @@
     resultEntry.loading(true);
 
     self.assistHelper.searchDocuments({
-      path: owner.path,
+      uuid: owner.uuid,
       query: query,
       successCallback: function (data) {
         resultEntry.hasErrors(false);
-        resultEntry.entries($.map(data.documents, function (definition) {
-          return new HueFileEntry({
+        var newEntries = [];
+
+        $.each(data.children, function (idx, definition) {
+          var entry = new HueFileEntry({
             activeEntry: self.activeEntry,
+            trashEntry: self.trashEntry,
             assistHelper: self.assistHelper,
             definition: definition,
             app: self.app,
             parent: self
-          })
-        }));
+          });
+          if (!entry.isTrash()) {
+            newEntries.push(entry);
+          }
+        });
+
+        resultEntry.entries(entries);
         resultEntry.loading(false);
         resultEntry.loaded(true);
       },
@@ -201,16 +250,23 @@
     self.selected(! self.selected());
   };
 
+  HueFileEntry.prototype.openSelected = function () {
+    var self = this;
+    if (self.selectedEntries().length === 1) {
+      self.selectedEntry().open();
+    }
+  };
+
   HueFileEntry.prototype.open = function () {
     var self = this;
-    if (self.definition.type === 'directory') {
+    if (self.definition().type === 'directory') {
       self.makeActive();
       huePubSub.publish('file.browser.directory.opened');
       if (! self.loaded()) {
         self.load();
       }
     } else {
-      window.location.href = self.definition.absoluteUrl;
+      window.location.href = self.definition().absoluteUrl;
     }
   };
 
@@ -223,22 +279,42 @@
 
     if (self.app === 'documents') {
       self.assistHelper.fetchDocuments({
-        path: self.path,
+        uuid: self.definition().uuid,
         successCallback: function(data) {
-          self.definition = data.directory;
+          self.definition(data.document);
           self.hasErrors(false);
-          self.entries($.map(data.documents, function (definition) {
-            return new HueFileEntry({
+          var newEntries = [];
+
+          $.each(data.children, function (idx, definition) {
+            var entry = new HueFileEntry({
               activeEntry: self.activeEntry,
+              trashEntry: self.trashEntry,
               assistHelper: self.assistHelper,
               definition: definition,
               app: self.app,
               parent: self
-            })
-          }));
+            });
+            if (entry.isTrash()) {
+              self.trashEntry(entry);
+            } else {
+              newEntries.push(entry);
+            }
+          });
+
+          newEntries.sort(function (a, b) {
+            if (a.isDirectory() && ! b.isDirectory()) {
+              return -1;
+            }
+            if (b.isDirectory() && ! a.isDirectory()) {
+              return 1;
+            }
+            return a.definition().name.localeCompare(b.definition().name);
+          });
+          self.entries(newEntries);
           if (! self.parent && data.parent) {
             self.parent = new HueFileEntry({
               activeEntry: self.activeEntry,
+              trashEntry: self.trashEntry,
               assistHelper: self.assistHelper,
               definition: data.parent,
               app: self.app,
@@ -260,15 +336,30 @@
     }
   };
 
+  HueFileEntry.prototype.showTrash = function () {
+    var self = this;
+    if (self.trashEntry()) {
+      self.trashEntry().open();
+    }
+  };
+
+  HueFileEntry.prototype.moveToTrash = function () {
+    var self = this;
+    if (self.selectedEntries().length > 0) {
+      self.entriesToDelete(self.selectedEntries());
+      self.removeDocuments(false);
+    }
+  }
+
   HueFileEntry.prototype.showDeleteConfirmation = function () {
     var self = this;
-    if (self.selectedEntries().length > 0 ) {
+    if (self.selectedEntries().length > 0) {
       self.entriesToDelete(self.selectedEntries());
       $('#deleteEntriesModal').modal('show');
     }
   };
 
-  HueFileEntry.prototype.performDelete = function () {
+  HueFileEntry.prototype.removeDocuments = function (deleteForever) {
     var self = this;
     if (self.app === 'documents') {
       if (self.entriesToDelete().indexOf(self) !== -1) {
@@ -277,15 +368,16 @@
 
       var deleteNext = function () {
         if (self.entriesToDelete().length > 0) {
-          var nextId = self.entriesToDelete().shift().definition.id;
+          var nextUuid = self.entriesToDelete().shift().definition().uuid;
           self.assistHelper.deleteDocument({
+            uuid: nextUuid,
+            skipTrash: deleteForever,
             successCallback: function () {
               deleteNext();
             },
             errorCallback: function () {
               self.activeEntry().load();
-            },
-            id: nextId
+            }
           });
         } else {
           self.activeEntry().load();
@@ -342,7 +434,8 @@
   };
 
   HueFileEntry.prototype.showUploadModal = function () {
-    if (self.app = 'documents') {
+    var self = this;
+    if (self.app == 'documents' && ! self.isTrash() && ! self.isTrashed()) {
       $('#importDocumentsModal').modal('show');
     }
   };
@@ -358,7 +451,7 @@
 
   HueFileEntry.prototype.downloadThis = function () {
     var self = this;
-    window.location.href = '/desktop/api2/doc/export?documents=' + ko.mapping.toJSON([ self.definition.id ]);
+    window.location.href = '/desktop/api2/doc/export?documents=' + ko.mapping.toJSON([ self.definition().id ]);
   };
 
   HueFileEntry.prototype.download = function () {
@@ -366,7 +459,7 @@
     if (self.app = 'documents') {
       if (self.selectedEntries().length > 0) {
         var ids = self.selectedEntries().map(function (entry) {
-          return entry.definition.id;
+          return entry.definition().id;
         })
         window.location.href = '/desktop/api2/doc/export?documents=' + ko.mapping.toJSON(ids);
       } else {
@@ -380,7 +473,7 @@
     if (self.app === 'documents') {
       self.assistHelper.createDocumentsFolder({
         successCallback: self.load.bind(self),
-        path: self.path,
+        parentUuid: self.definition().uuid,
         name: name
       });
     }

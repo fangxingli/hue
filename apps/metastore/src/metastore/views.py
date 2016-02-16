@@ -36,11 +36,10 @@ from beeswax.models import SavedQuery, MetaInstall
 from beeswax.server import dbms
 from beeswax.server.dbms import get_query_server_config
 from filebrowser.views import location_to_url
-from metadata.optimizer_client import is_optimizer_enabled
-from notebook.connectors.base import Notebook
-
 from metastore.forms import LoadDataForm, DbForm
 from metastore.settings import DJANGO_APPS
+from notebook.connectors.base import Notebook
+
 
 LOG = logging.getLogger(__name__)
 
@@ -180,7 +179,6 @@ def show_tables(request, database=None):
     'database': None,
     'partitions': [],
     'has_write_access': has_write_access(request.user),
-    'is_optimizer_enabled': is_optimizer_enabled() and request.user.is_superuser
     })
 
   return resp
@@ -331,7 +329,7 @@ def drop_table(request, database):
       # Can't be simpler without an important refactoring
       design = SavedQuery.create_empty(app_name='beeswax', owner=request.user, data=hql_query('').dumps())
       query_history = db.drop_tables(database, tables_objects, design)
-      url = reverse('beeswax:watch_query_history', kwargs={'query_history_id': query_history.id}) + '?on_success_url=' + reverse('metastore:show_tables')
+      url = reverse('beeswax:watch_query_history', kwargs={'query_history_id': query_history.id}) + '?on_success_url=' + reverse('metastore:show_tables', kwargs={'database': database})
       return redirect(url)
     except Exception, ex:
       error_message, log = dbms.expand_exception(ex, db)

@@ -808,12 +808,12 @@ ${ commonshare() | n,unicode }
 <script src="${ static('desktop/js/assist/assistHdfsEntry.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/assist/assistDbEntry.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/assist/assistDbSource.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/js/assist/assistDocuments.js') }" type="text/javascript" charset="utf-8"></script>
+<script src="${ static('desktop/js/fileBrowser/hueFileEntry.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/autocompleter.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('notebook/js/notebook.ko.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('beeswax/js/beeswax.vm.js') }"></script>
 <script src="${ static('desktop/js/share.vm.js') }"></script>
-<script src="${ static('desktop/ext/js/vkbeautify.js') }" type="text/javascript" charset="utf-8"></script>
+<script src="${ static('desktop/js/vkbeautify.js') }" type="text/javascript" charset="utf-8"></script>
 
 <script src="${ static('desktop/ext/js/codemirror-3.11.js') }"></script>
 <link rel="stylesheet" href="${ static('desktop/ext/css/codemirror.css') }">
@@ -957,12 +957,16 @@ ${ tableStats.tableStats() }
   }
 
   .fullscreen {
-    position: absolute;
-    top: 70px;
+    position: fixed;
+    top: -16px;
     left: 0;
     width: 100%;
     background-color: #FFFFFF;
-    z-index: 100;
+    z-index: 2000;
+  }
+
+  body.fullscreen {
+    overflow: hidden;
   }
 
   .map {
@@ -1148,7 +1152,8 @@ var snippet = notebook.newSnippet(snippetType);
 var assistHelper = snippet.getAssistHelper();
 var autocompleter = new Autocompleter({
   snippet: snippet,
-  user: HIVE_AUTOCOMPLETE_USER
+  user: HIVE_AUTOCOMPLETE_USER,
+  oldEditor: true
 });
 
 var escapeOutput = function (str) {
@@ -1331,19 +1336,21 @@ $(document).ready(function () {
     $(".table-container").css("max-height", ($(window).height() - 180) + "px").css("overflow-y", "auto");
   };
 
-  $("#expandResults").on("click", function(){
+  $(document).on("click", "#expandResults", function(){
     $("#resultTablejHueTableExtenderClonedContainer").remove();
     $("#resultTablejHueTableExtenderClonedContainerColumn").remove();
     $("#resultTablejHueTableExtenderClonedContainerCell").remove();
     if ($(this).find("i").hasClass("fa-expand")){
       $(this).find("i").removeClass("fa-expand").addClass("fa-compress");
-      $(this).parent().parent().addClass("fullscreen");
+      $(this).parents('.resultsContainer').addClass("fullscreen");
+      $('body').addClass("fullscreen");
     }
     else {
       $(this).find("i").addClass("fa-expand").removeClass("fa-compress");
-      $(this).parent().parent().removeClass("fullscreen");
+      $(this).parents('.resultsContainer').removeClass("fullscreen");
+      $('body').removeClass("fullscreen");
     }
-    reinitializeTable();
+    window.setTimeout(reinitializeTable, 200);
   });
 
   resizeNavigator();
@@ -1374,9 +1381,9 @@ $(document).ready(function () {
   });
 
   $(document).on("shown", "a[data-toggle='tab']:not(.sidetab)", function (e) {
-    if ($(e.target).attr("href") == "#log") {
+    if ($(e.target).attr("href") == "#log" || $(e.target).attr("href") == "#query" ) {
       logsAtEnd = true;
-      window.setTimeout(resizeLogs, 150);
+      window.setTimeout(resizeLogs, 100);
     }
     if ($(e.target).attr("href") == "#results" && $(e.relatedTarget).attr("href") == "#columns") {
       if ($("#resultTable .columnSelected").length > 0) {
@@ -1390,14 +1397,11 @@ $(document).ready(function () {
     if ($(e.target).attr("href") == "#results" || $(e.target).attr("href") == "#recentTab") {
       reinitializeTableExtenders();
     }
-    if ($(e.target).attr("href") != "#results"){
+    if ($(e.target).attr("href") != "#results" && $(e.target).attr("href") != "#columns"){
       $($(e.target).attr("href")).css('height', 'auto');
       if ($(e.target).attr("href") == "#chart") {
         logGA('results/chart');
         predictGraph();
-      }
-      if ($(e.target).attr("href") == "#resultTab") {
-        reinitializeTable();
       }
     } else {
       reinitializeTable();
@@ -1425,21 +1429,22 @@ function getHighlightedQuery() {
 
 function reinitializeTable(max) {
   var _max = max || 10;
+  var _heightCorrection = $('body').hasClass('fullscreen') ? 85 : 150;
 
   function fn(){
     var container = $($("a[data-toggle='tab']:not(.sidetab)").parent(".active").find("a").attr("href"));
     if ($("#results .dataTables_wrapper").height() > 0) {
 
       $("#results .dataTables_wrapper").jHueTableScroller({
-        minHeight: $(window).height() - 150,
+        minHeight: $(window).height() - _heightCorrection,
         heightAfterCorrection: 0
       });
       $("#recentTab .dataTables_wrapper").jHueTableScroller({
-        minHeight: $(window).height() - 150,
+        minHeight: $(window).height() - _heightCorrection,
         heightAfterCorrection: 0
       });
       reinitializeTableExtenders();
-      container.height($(window).height() - 150);
+      container.height($(window).height() - _heightCorrection);
       $("#results .dataTables_wrapper").jHueScrollUp();
     } else if ($('#resultEmpty').height() > 0) {
       container.height($('#resultEmpty').height());
@@ -1471,21 +1476,9 @@ $(document).ready(function () {
 
   initQueryField();
 
-  var resizeTimeout = -1;
-  var winWidth = $(window).width();
-  var winHeight = $(window).height();
+  $(window).on("resize", resizeNavigator);
 
-  $(window).on("resize", function () {
-    window.clearTimeout(resizeTimeout);
-    resizeTimeout = window.setTimeout(function () {
-      // prevents endless loop in IE8
-      if (winWidth != $(window).width() || winHeight != $(window).height()) {
-        resizeNavigator();
-        winWidth = $(window).width();
-        winHeight = $(window).height();
-      }
-    }, 200);
-  });
+  window.setInterval(resizeNavigator, 1000);
 
   function initQueryField() {
     if ($("#queryField").val() == "") {
@@ -1918,6 +1911,9 @@ $(document).ready(function () {
   $("a[href='#log']").on("shown", function () {
     resizeLogs();
   });
+  $("a[href='#query']").on("shown", function () {
+    resizeLogs();
+  });
 
   % if app_name == 'impala':
   $("a[href='#sessionTab']").on("shown", function () {
@@ -2006,6 +2002,11 @@ function resizeLogs() {
     var _height = Math.max($(window).height() - $("#log pre:eq(1)").offset().top, 250);
     $("#log").height(_height - 10);
     $("#log pre:eq(1)").css("overflow", "auto").height(_height - 50);
+  }
+  if ($("#query pre:eq(1)").length > 0) {
+    var _height = Math.max($(window).height() - $("#log pre:eq(1)").offset().top, 250);
+    $("#query").height(_height - 10);
+    $("#query pre:eq(1)").css("overflow", "auto").height(_height - 50);
   }
 }
 
@@ -2804,7 +2805,7 @@ viewModel.design.fileResources.values.subscribe(function() {
     }
     else if (viewModel.design.results.errors().length == 0) {
       window.setTimeout(function(){
-        window.location.href = "${request.GET['on_success_url']}";
+        window.location.href = successUrl + (successUrl.indexOf("?") > -1 ? "&" : "?") + "refresh=true";
       }, 200);
     }
   });

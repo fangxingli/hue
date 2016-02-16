@@ -146,7 +146,7 @@ SSL_CACERTS = Config(
   key="ssl_cacerts",
   help=_('Path to default Certificate Authority certificates.'),
   type=str,
-  default='/etc/hue/cacerts.pem')
+  default='')
 
 SSL_VALIDATE = Config(
   key="ssl_validate",
@@ -630,6 +630,10 @@ CUSTOM = ConfigSection(
                    default="",
                    help=_("The login splash HTML code. This code will be placed in the login page, "
                         "useful for security warning messages.")),
+    CACHEABLE_TTL=Config("cacheable_ttl",
+                   default=86400000,
+                   type=int,
+                   help=_("The cache TTL in milliseconds for the assist/autocomplete/etc calls. Set to 0 it disables the cache.")),
 ))
 
 AUTH = ConfigSection(

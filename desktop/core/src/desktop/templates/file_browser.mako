@@ -108,14 +108,17 @@ from desktop.views import _ko
       display: inline-block;
       position: absolute;
       right: 10px;
-      top: 5px;
+      top: 14px;
       height: 50px;
       line-height: 50px;
     }
 
+    .fb-list {
+      padding: 4px 0;
+    }
+
     .fb-list ul {
       list-style: none;
-      padding: 4px 0;
       margin: 0;
     }
 
@@ -170,6 +173,19 @@ from desktop.views import _ko
       height: 30px;
       line-height: 30px;
       vertical-align: middle;
+    }
+
+    .fb-share {
+      width: 80px;
+    }
+
+    .fb-share i {
+      font-size: 12px;
+      color: #ddd;
+    }
+
+    .fb-shared-icon-active {
+      color: #338BB8 !important;
     }
 
     .fb-type {
@@ -241,20 +257,25 @@ from desktop.views import _ko
       width: 542px;
     }
 
-    .fb-search-container {
-      position: absolute;
-      top: 17px;
-      right: 300px;
-      opacity: 0;
-
-      -webkit-transition: opacity 0.3s ease;
-      -moz-transition: opacity 0.3s ease;
-      -ms-transition: opacity 0.3s ease;
-      transition: opacity 0.3s ease;
+    @-webkit-keyframes fb-search-visible {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
 
-    .fb-search-visible {
-      opacity: 1;
+    @keyframes fb-search-visible {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .fb-search-container {
+      position: absolute;
+      top: 26px;
+      right: 300px;
+
+      -webkit-animation-name: fb-search-visible;
+      animation-name: fb-search-visible;
+      -webkit-animation-duration: 0.4s;
+      animation-duration: 0.4s;
     }
 
     .fb-search-container input {
@@ -268,7 +289,8 @@ from desktop.views import _ko
     </div>
 
     <div id="shareDocumentModal" class="modal hide fade">
-      <!-- ko with: activeEntry().selectedEntry() -->
+      <!-- ko with: activeEntry -->
+      <!-- ko with: selectedEntry -->
       <!-- ko with: document -->
       <div class="modal-header">
         <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
@@ -337,6 +359,7 @@ from desktop.views import _ko
       </div>
       <!-- /ko -->
       <!-- /ko -->
+      <!-- /ko -->
     </div>
 
     <div id="importDocumentsModal" class="modal hide fade fileupload-modal">
@@ -357,7 +380,7 @@ from desktop.views import _ko
             <span data-bind="visible: uploadFailed">${ _('Import failed!') }</span>
             <progress data-bind="visible: uploading() || uploadComplete()" id="importDocumentsProgress" value="0" max="100" style="width: 560px;"></progress>
             ${ csrf_token(request) | n,unicode }
-            <input type="hidden" name="path" data-bind="value: path" />
+            <input type="hidden" name="path" data-bind="value: definition().path" />
           </form>
         </div>
         <div class="modal-footer">
@@ -390,13 +413,13 @@ from desktop.views import _ko
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times</a>
         <h3>${ _('Do you really want to delete') }
-          <!-- ko if: entriesToDelete().length == 1 --> <span data-bind="text: entriesToDelete()[0].name"></span><!-- /ko -->
+          <!-- ko if: entriesToDelete().length == 1 --> <span data-bind="text: entriesToDelete()[0].definition().name"></span><!-- /ko -->
           <!-- ko if: entriesToDelete().length > 1 --> <span data-bind="text: entriesToDelete().length"></span> ${ _('entries') }<!-- /ko -->
         ?</h3>
       </div>
       <div class="modal-footer">
         <input type="button" class="btn" data-dismiss="modal" value="${ _('Cancel') }">
-        <input type="submit" data-bind="click: performDelete" class="btn btn-danger" value="${_('Yes')}"/>
+        <input type="submit" data-bind="click: function() { removeDocuments(true); }" class="btn btn-danger" value="${_('Yes')}"/>
       </div>
       <!-- /ko -->
     </div>
@@ -411,23 +434,26 @@ from desktop.views import _ko
               <!-- /ko -->
 
               <!-- ko foreach: breadcrumbs -->
-              <li><div class="fb-drop-target" data-bind="folderDroppable: { entries: $parent.entries, disableSelect: true }"><a href="javascript:void(0);" data-bind="text: isRoot ? '${ _('My documents') }' : name, click: open"></a></div></li>
+              <li><div class="fb-drop-target" data-bind="fileDroppable: { entries: $parent.entries, disableSelect: true }"><a href="javascript:void(0);" data-bind="text: isRoot() ? '${ _('My documents') }' : (isTrash() ? '${ _('Trash') }' : definition().name), click: open"></a></div></li>
               <li class="divider">&gt;</li>
               <!-- /ko -->
               <!-- ko ifNot: isRoot -->
-              <li class="active"><div class="fb-drop-target" data-bind="text: name"></div></li>
+              <li class="active"><div class="fb-drop-target" data-bind="text: isTrash() ? '${ _('Trash') }' : definition().name"></div></li>
               <!-- /ko -->
             </ul>
           </div>
-          <div class="fb-search-container" data-bind="css: { 'fb-search-visible' : searchVisible() }">
-            <input class="clearable" type="text" placeholder="Search for name, description, etc..." data-bind="textInput: searchQuery, clearable: searchQuery">
-          </div>
-          <!-- ko with: activeEntry -->
-          <div class="fb-folder-actions" data-bind="visible: ! hasErrors()">
-            <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="toggle: $parent.searchVisible, css: { 'blue' : ($parent.searchVisible() || $parent.searchQuery()) }"><i class="fa fa-fw fa-search"></i></a>
-            <!-- ko if: app === 'documents' -->
+        </h4>
+        <!-- ko if: searchVisible -->
+        <div class="fb-search-container">
+          <input class="clearable" type="text" placeholder="Search for name, description, etc..." data-bind="textInput: searchQuery, clearable: searchQuery">
+        </div>
+        <!-- /ko -->
+        <!-- ko with: activeEntry -->
+        <div class="fb-folder-actions" data-bind="visible: ! hasErrors()">
+          <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="toggle: $parent.searchVisible, css: { 'blue' : ($parent.searchVisible() || $parent.searchQuery()) }"><i class="fa fa-fw fa-search"></i></a>
+          <!-- ko if: app === 'documents' -->
             <span class="dropdown">
-              <a class="inactive-action fb-action" data-toggle="dropdown" href="javascript:void(0);"><span class="fa-stack fa-fw" style="width: 1.28571429em"><i class="fa fa-file-o fa-stack-1x"></i><i class="fa fa-plus-circle fa-stack-1x" style="font-size: 14px; margin-left: 6px; margin-top: 6px;"></i></span></a>
+              <a class="inactive-action fb-action" data-toggle="dropdown" data-bind="css: { 'disabled': isTrash() || isTrashed() }" href="javascript:void(0);"><span class="fa-stack fa-fw" style="width: 1.28571429em"><i class="fa fa-file-o fa-stack-1x"></i><i class="fa fa-plus-circle fa-stack-1x" style="font-size: 14px; margin-left: 6px; margin-top: 6px;"></i></span></a>
               <ul class="dropdown-menu" style="margin-top:10px; width: 175px;" role="menu">
                 % if 'beeswax' in apps:
                   <li><a href="${ url('beeswax:index') }"><img src="${ static(apps['beeswax'].icon_path) }" class="app-icon"/> ${_('Hive Query')}</a></li>
@@ -448,17 +474,19 @@ from desktop.views import _ko
                 % endif
               </ul>
             </span>
-            <!-- /ko -->
-            <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: function () { $('#createDirectoryModal').modal('show'); }"><span class="fa-stack fa-fw" style="width: 1.28571429em;"><i class="fa fa-folder-o fa-stack-1x" ></i><i class="fa fa-plus-circle fa-stack-1x" style="font-size: 14px; margin-left: 7px; margin-top: 3px;"></i></span></a>
-            <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: showDeleteConfirmation, css: { 'disabled': selectedEntries().length === 0 }"><i class="fa fa-fw fa-times"></i></a>
-            <!-- ko if: app === 'documents' -->
-            <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: showSharingModal, css: { 'disabled': selectedEntries().length !== 1 }"><i class="fa fa-fw fa-users"></i></a>
-            <!-- /ko -->
-            <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: download"><i class="fa fa-fw fa-download"></i></a>
-            <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: showUploadModal"><i class="fa fa-fw fa-upload"></i></a>
-          </div>
           <!-- /ko -->
-        </h4>
+          <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: function () { showNewDirectoryModal() }, css: { 'disabled': isTrash() || isTrashed() }"><span class="fa-stack fa-fw" style="width: 1.28571429em;"><i class="fa fa-folder-o fa-stack-1x" ></i><i class="fa fa-plus-circle fa-stack-1x" style="font-size: 14px; margin-left: 7px; margin-top: 3px;"></i></span></a>
+          <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: function () { if (isTrash() || isTrashed()) { showDeleteConfirmation() } else { moveToTrash() } }, css: { 'disabled': selectedEntries().length === 0 }"><i class="fa fa-fw fa-times"></i></a>
+          <!-- ko if: app === 'documents' -->
+          <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: function() { showSharingModal(null) }, css: { 'disabled': selectedEntries().length !== 1 || (selectedEntries().length === 1 && selectedEntries()[0].isTrashed) }"><i class="fa fa-fw fa-users"></i></a>
+          <!-- /ko -->
+          <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: download"><i class="fa fa-fw fa-download"></i></a>
+          <a class="inactive-action fb-action" href="javascript:void(0);" data-bind="click: showUploadModal, css: { 'disabled': isTrash() || isTrashed() }"><i class="fa fa-fw fa-upload"></i></a>
+          <!-- ko if: app === 'documents' -->
+          <a class="inactive-action fb-action" style="margin-left: 20px;" href="javascript:void(0);" data-bind="click: showTrash, trashDroppable, css: { 'blue' : isTrash() || isTrashed() }"><i class="fa fa-fw fa-trash-o"></i></a>
+          <!-- /ko -->
+        </div>
+        <!-- /ko -->
       </div>
 
       <!-- ko with: activeEntry -->
@@ -466,6 +494,7 @@ from desktop.views import _ko
       <div class="fb-header">
         <div class="fb-primary-col">${ _('Name') }</div>
         <div class="fb-attr-group">
+          <div class="fb-attr-col fb-share" data-bind="visible: !isTrash()">${ _('Sharing') }</div>
           <div class="fb-attr-col fb-type">${ _('Type') }</div>
           <div class="fb-attr-col fb-owner">${ _('Owner') }</div>
           <div class="fb-attr-col fb-modified">${ _('Last Modified') }</div>
@@ -473,14 +502,17 @@ from desktop.views import _ko
       </div>
       <!-- /ko -->
 
-      <div class="fb-empty animated" style="display:none;" data-bind="visible: entries().length == 0 && ! hasErrors() && ! loading() && ! definition.isSearchResult">
-        ${ _('The current folder is empty. You can add a new file or folder form the top right menu.')}
+      <div class="fb-empty animated" style="display:none;" data-bind="visible: entries().length == 0 && ! hasErrors() && ! loading() && ! definition().isSearchResult && ! isTrash()">
+        ${ _('The current folder is empty, you can add a new file or folder form the top right menu')}
       </div>
-      <div class="fb-empty animated" style="display:none;" data-bind="visible: entries().length == 0 && ! hasErrors() && ! loading() && definition.isSearchResult">
-        ${ _('No documents found matching your query.')}
+      <div class="fb-empty animated" style="display:none;" data-bind="visible: entries().length == 0 && ! hasErrors() && ! loading() && ! definition().isSearchResult && isTrash()">
+        ${ _('The trash is empty')}
+      </div>
+      <div class="fb-empty animated" style="display:none;" data-bind="visible: entries().length == 0 && ! hasErrors() && ! loading() && definition().isSearchResult">
+        ${ _('No documents found matching your query')}
       </div>
       <div class="fb-empty animated" style="display: none;" data-bind="visible: hasErrors() && app === 'documents' && ! loading()">
-        ${ _('There was an error loading the documents.')}
+        ${ _('There was an error loading the documents')}
       </div>
       <div class="fb-empty animated" style="display: none;" data-bind="visible: loading">
         <i class="fa fa-spinner fa-spin fa-2x" style="color: #999;"></i>
@@ -489,19 +521,27 @@ from desktop.views import _ko
 
 
       <div class="fb-list" data-bind="with: activeEntry">
-        <ul data-bind="foreach: { data: entries, itemHeight: 39, scrollableElement: '.fb-list' }">
-          <li data-bind="fileSelect: $parent.entries, folderDroppable: { entries: $parent.entries }, css: { 'fb-selected': selected }">
+        <ul data-bind="foreachVisible: { data: entries, minHeight: 39, container: '.fb-list', scrollYFixedTop: true }">
+          <li data-bind="fileSelect: $parent.entries, fileDroppable: { entries: $parent.entries }, css: { 'fb-selected': selected }">
             <div style="width: 100%; height: 100%" data-bind="contextMenu: { menuSelector: '.hue-context-menu', beforeOpen: beforeContextOpen }">
               <ul class="hue-context-menu">
-                <li><a href="javascript:void(0);" data-bind="click: contextMenuDownload"><i class="fa fa-download"></i> ${ _('Download') } <span data-bind="visible: $parent.selectedEntries().length > 1, text: '(' + $parent.selectedEntries().length + ')'"></span></a></li>
+                <!-- ko if: isTrashed -->
                 <li><a href="javascript:void(0);" data-bind="click: function() { $parent.showDeleteConfirmation(); }"><i class="fa fa-fw fa-times"></i> ${ _('Delete') } <span data-bind="visible: $parent.selectedEntries().length > 1, text: '(' + $parent.selectedEntries().length + ')'"></span></a></li>
+                <!-- /ko -->
+                <!-- ko ifnot: isTrashed -->
+                <li data-bind="css: { 'disabled': $parent.selectedEntries().length !== 1 }"><a href="javascript:void(0);" data-bind="click: open, css: { 'disabled': $parent.selectedEntries().length !== 1 }"><i class="fa fa-file-o"></i> ${ _('Open') }</a></li>
+                <li><a href="javascript:void(0);" data-bind="click: contextMenuDownload"><i class="fa fa-download"></i> ${ _('Download') } <span data-bind="visible: $parent.selectedEntries().length > 1, text: '(' + $parent.selectedEntries().length + ')'"></span></a></li>
+                <li data-bind="visible: ! $altDown()"><a href="javascript:void(0);" data-bind="click: function () { $parent.moveToTrash(); }"><i class="fa fa-fw fa-trash-o"></i> ${ _('Remove') } <span data-bind="visible: $parent.selectedEntries().length > 1, text: '(' + $parent.selectedEntries().length + ')'"></span></a></li>
+                <li data-bind="visible: $altDown()"><a href="javascript:void(0);" data-bind="click: function() { $parent.showDeleteConfirmation(); }"><i class="fa fa-fw fa-times"></i> ${ _('Delete') } <span data-bind="visible: $parent.selectedEntries().length > 1, text: '(' + $parent.selectedEntries().length + ')'"></span></a></li>
                 <li data-bind="css: { 'disabled': $parent.selectedEntries().length !== 1 }"><a href="javascript:void(0);" data-bind="click: function() { $parent.showSharingModal(); }, css: { 'disabled': $parent.selectedEntries().length !== 1 }"><i class="fa fa-fw fa-users"></i> ${ _('Share') }</a> </li>
+                <!-- /ko -->
               </ul>
               <div class="fb-primary-col">
-                <i class="fa fa-fw" data-bind="css: { 'fa-folder-o' : isDirectory, 'fa-file-o': ! isDirectory }"></i>
-                <a href="javascript: void(0);" data-bind="text: name, click: open"></a>
+                <i class="fa fa-fw" data-bind="css: { 'fa-folder-o' : isDirectory, 'fa-file-o': ! isDirectory() }"></i>
+                <a href="javascript: void(0);" data-bind="text: definition().name, click: open"></a>
               </div>
               <div class="fb-attr-group">
+                <div class="fb-attr-col fb-share" data-bind="visible: !$parent.isTrash()"><i class="fa fa-fw fa-users fb-shared-icon" data-bind="click: function (entry, event) { $parent.showSharingModal($data); event.stopPropagation(); }, css: { 'fb-shared-icon-active': isShared }"></i></div>
                 <!-- ko with: definition -->
                 <div class="fb-attr-col fb-type" data-bind="text: type"></div>
                 <div class="fb-attr-col fb-owner" data-bind="text: owner"></div>
@@ -526,7 +566,33 @@ from desktop.views import _ko
       }
     }(function (ko) {
 
-      ko.bindingHandlers.folderDroppable = {
+      ko.bindingHandlers.trashDroppable = {
+        init: function(element, valueAccessor, allBindings, boundEntry) {
+          var dragData;
+          huePubSub.subscribe('file.browser.dragging', function (data) {
+            dragData = data;
+          });
+          var $element = $(element);
+          $element.droppable({
+            drop: function () {
+              if (dragData && !dragData.dragToSelect) {
+                boundEntry.moveToTrash();
+                $element.removeClass('blue');
+              }
+            },
+            over: function () {
+              if (dragData && !dragData.dragToSelect) {
+                $element.addClass('blue');
+              }
+            },
+            out: function () {
+              $element.removeClass('blue');
+            }
+          })
+        }
+      };
+
+      ko.bindingHandlers.fileDroppable = {
         init: function(element, valueAccessor, allBindings, boundEntry, bindingContext) {
           var options = valueAccessor();
           var allEntries = options.entries;
@@ -538,36 +604,35 @@ from desktop.views import _ko
             alreadySelected = boundEntry.selected();
             dragToSelect = value;
           });
-          if (boundEntry.isDirectory) {
-            $element.droppable({
-              drop: function (ev, ui) {
-                if (! dragToSelect) {
-                  boundEntry.moveHere($.grep(allEntries(), function (entry) {
-                    return entry.selected();
-                  }));
-                }
-              },
-              over: function () {
-                if (dragToSelect && ! disableSelect) {
-                  boundEntry.selected(true);
-                } else if (! dragToSelect) {
-                  $element.addClass('fb-drop-hover');
-                }
-              },
-              out: function (event, ui) {
-                if (!(alreadySelected && (event.metaKey || event.ctrlKey)) && dragToSelect && ! disableSelect) {
-                  var originTop = ui.draggable[0].getBoundingClientRect().top;
-                  var elementMiddle = element.getBoundingClientRect().top + (element.getBoundingClientRect().height / 2)
-                  if ((originTop > elementMiddle && ui.position.top > elementMiddle) ||
-                      (originTop < elementMiddle && ui.position.top < elementMiddle)) {
-                    boundEntry.selected(false);
-                  }
-                } else if (! dragToSelect) {
-                  $element.removeClass('fb-drop-hover');
-                }
+          $element.droppable({
+            drop: function (ev, ui) {
+              if (! dragToSelect && boundEntry.isDirectory()) {
+                boundEntry.moveHere($.grep(allEntries(), function (entry) {
+                  return entry.selected();
+                }));
               }
-            })
-          }
+              $element.removeClass('fb-drop-hover');
+            },
+            over: function () {
+              if (dragToSelect && ! disableSelect) {
+                boundEntry.selected(true);
+              } else if (! dragToSelect && boundEntry.isDirectory()) {
+                $element.addClass('fb-drop-hover');
+              }
+            },
+            out: function (event, ui) {
+              if (!(alreadySelected && (event.metaKey || event.ctrlKey)) && dragToSelect && ! disableSelect) {
+                var originTop = ui.draggable[0].getBoundingClientRect().top;
+                var elementMiddle = element.getBoundingClientRect().top + (element.getBoundingClientRect().height / 2)
+                if ((originTop > elementMiddle && ui.position.top > elementMiddle) ||
+                    (originTop < elementMiddle && ui.position.top < elementMiddle)) {
+                  boundEntry.selected(false);
+                }
+              } else if (! dragToSelect && boundEntry.isDirectory()) {
+                $element.removeClass('fb-drop-hover');
+              }
+            }
+          })
         }
       };
 
@@ -590,12 +655,18 @@ from desktop.views import _ko
 
               dragToSelect = ! boundEntry.selected();
 
+              huePubSub.publish('file.browser.dragging', {
+                selectedEntries: selectedEntries,
+                originEntry: boundEntry.parent,
+                dragToSelect: dragToSelect
+              });
+
               dragStartX = event.clientX;
               dragStartY = event.clientY;
 
               huePubSub.publish('fb.drag.to.select', dragToSelect);
 
-              if (selectedEntries.length > 0 && ! (event.metaKey || event.ctrlKey)){
+              if (dragToSelect && selectedEntries.length > 0 && ! (event.metaKey || event.ctrlKey)){
                 $.each(selectedEntries, function (idx, selectedEntry) {
                   if (selectedEntry !== boundEntry) {
                    selectedEntry.selected(false);
@@ -612,7 +683,7 @@ from desktop.views import _ko
                   $helper.find('.drag-text').text(selectedEntries.length + ' ${ _('selected') }');
                   $helper.find('i').removeClass().addClass('fa fa-fw fa-clone');
                 } else {
-                  $helper.find('.drag-text').text(boundEntry.name);
+                  $helper.find('.drag-text').text(boundEntry.definition().name);
                   $helper.find('i').removeClass().addClass($element.find('.fb-primary-col i').attr('class'));
                 }
 
@@ -698,7 +769,7 @@ from desktop.views import _ko
           self.activeEntry().search(query);
         });
 
-        self.searchVisible = ko.observable(true);
+        self.searchVisible = ko.observable(false);
 
         huePubSub.subscribe('file.browser.directory.opened', function () {
           self.searchQuery('');

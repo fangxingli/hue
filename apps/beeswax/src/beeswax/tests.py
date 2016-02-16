@@ -78,7 +78,7 @@ from beeswax.server.dbms import QueryServerException
 from beeswax.server.hive_server2_lib import HiveServerClient,\
   PartitionKeyCompatible, PartitionValueCompatible, HiveServerTable,\
   HiveServerTColumnValue2
-from beeswax.test_base import BeeswaxSampleProvider
+from beeswax.test_base import BeeswaxSampleProvider, is_hive_on_spark
 from beeswax.hive_site import get_metastore
 
 
@@ -218,8 +218,10 @@ for x in sys.stdin:
     response = _make_query(self.client, QUERY, local=False, database=self.db_name)
     content = json.loads(response.content)
     assert_true('watch_url' in content)
+
     # Check that we report this query as "running" (this query should take a little while).
-    self._verify_query_state(beeswax.models.QueryHistory.STATE.running)
+    if not is_hive_on_spark():
+      self._verify_query_state(beeswax.models.QueryHistory.STATE.running)
 
     response = wait_for_query_to_finish(self.client, response, max=180.0)
     content = fetch_query_result_data(self.client, response)
@@ -365,10 +367,12 @@ for x in sys.stdin:
 
     assert_equal([2.0, 4.0], content["results"][0])
     log = content['log']
-    assert_true(search_log_line('map = 100%', log), log)
-    assert_true(search_log_line('reduce = 100%', log), log)
-    # Test job extraction while we're at it
-    assert_equal(1, len(content["hadoop_jobs"]), "Should have started 1 job and extracted it.")
+
+    if not is_hive_on_spark():
+      assert_true(search_log_line('map = 100%', log), log)
+      assert_true(search_log_line('reduce = 100%', log), log)
+      # Test job extraction while we're at it
+      assert_equal(1, len(content["hadoop_jobs"]), "Should have started 1 job and extracted it.")
 
 
   def test_query_with_remote_udf(self):
@@ -1215,12 +1219,20 @@ for x in sys.stdin:
     assert_true(data['rows'], data)
     resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': 'default', 'table': 'customers'}))
 
-    # New designs exists
-    resp = self.client.get('/beeswax/list_designs')
-    assert_true('Sample: Job loss' in resp.content, resp.content)
-    assert_true('Sample: Salary growth' in resp.content)
-    assert_true('Sample: Top salary' in resp.content)
-    assert_true('Sample: Customers' in resp.content)
+    # New queries exist
+    resp = self.client.get('/desktop/api2/docs/')
+    data = json.loads(resp.content)
+    doc_names = [doc['name'] for doc in data['documents']]
+    assert_true('examples' in doc_names, data)
+    uuid = next((doc['uuid'] for doc in data['documents'] if doc['name'] == 'examples'), None)
+
+    resp = self.client.get('/desktop/api2/doc/', {'uuid': uuid})
+    data = json.loads(resp.content)
+    doc_names = [doc['name'] for doc in data['children']]
+    assert_true('Sample: Job loss' in doc_names, data)
+    assert_true('Sample: Salary growth' in doc_names, data)
+    assert_true('Sample: Top salary' in doc_names, data)
+    assert_true('Sample: Customers' in doc_names, data)
 
     # Now install it a second time, and no error
     resp = self.client.post('/beeswax/install_examples')
@@ -1955,6 +1967,23 @@ for x in sys.stdin:
     assert_equal(2, len(json_resp['rows']), json_resp['rows'])
 
 
+  def test_get_settings(self):
+    resets = [
+      beeswax.conf.CONFIG_WHITELIST.set_for_testing('hive.execution.engine,mapreduce.job.queuename'),
+    ]
+
+    try:
+      resp = self.client.get(reverse("beeswax:get_settings"))
+      json_resp = json.loads(resp.content)
+      assert_equal(0, json_resp['status'])
+      assert_equal(2, len(json_resp['settings'].items()), json_resp)
+      assert_true('hive.execution.engine' in json_resp['settings'])
+      assert_true('mapreduce.job.queuename' in json_resp['settings'])
+    finally:
+      for reset in resets:
+        reset()
+
+
   def test_get_functions(self):
     resp = self.client.get(reverse("beeswax:get_functions"))
     json_resp = json.loads(resp.content)
@@ -1985,6 +2014,9 @@ for x in sys.stdin:
     """
     Test that the HS2 logs send back the ql.Driver log output with JobID
     """
+    if is_hive_on_spark():
+      raise SkipTest
+
     hql = "SELECT foo FROM `%(db)s`.`test` GROUP BY foo" % {'db': self.db_name}  # GROUP BY forces the MR job
     response = _make_query(self.client, hql, wait=True, local=False, max=180.0, database=self.db_name)
     content = fetch_query_result_data(self.client, response)
@@ -3172,7 +3204,7 @@ def hive_site_xml(is_local=False, use_sasl=False, thrift_uris='thrift://darkside
 
 def test_ssl_cacerts():
   for desktop_kwargs, conf_kwargs, expected in [
-      ({'present': False}, {'present': False}, '/etc/hue/cacerts.pem'),
+      ({'present': False}, {'present': False}, ''),
       ({'present': False}, {'data': 'local-cacerts.pem'}, 'local-cacerts.pem'),
 
       ({'data': 'global-cacerts.pem'}, {'present': False}, 'global-cacerts.pem'),

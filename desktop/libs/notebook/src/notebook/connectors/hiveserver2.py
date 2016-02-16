@@ -106,6 +106,7 @@ class HS2Api(Api):
 
     # Multiquery, if not first statement or arrived to the last query
     statement_id = snippet['result']['handle'].get('statement_id', 0)
+    statements_count = snippet['result']['handle'].get('statements_count', 1)
     if snippet['result']['handle'].get('has_more_statements'):
       try:
         handle = self._get_handle(snippet)
@@ -117,22 +118,19 @@ class HS2Api(Api):
       statement_id = 0
 
     statements = self._get_statements(snippet['statement'])
+    if statements_count != len(statements):
+      statement_id = 0
     statement = statements[statement_id]
 
     settings = snippet['properties'].get('settings', None)
     file_resources = snippet['properties'].get('files', None)
     functions = snippet['properties'].get('functions', None)
+    database = snippet.get('database') or 'default'
 
-    if settings:
-      settings = [{'key': s.rsplit('=', 1)[0], 'value': s.rsplit('=', 1)[1]} for s in settings] # TODO integrate with new binding
-    if file_resources:
-      file_resources = [{'type': 'JAR', 'path': f} for f in file_resources] # TODO support FILE ARCHIVE
-    if functions:
-      functions = [{'name': f.rsplit(' ', 1)[0], 'class_name': f.rsplit(' ', 1)[1]} for f in functions] # TODO protect for index out of bounds
-
-    query = hql_query(statement, query_type=QUERY_TYPES[0], settings=settings, file_resources=file_resources, functions=functions)
+    query = hql_query(statement, query_type=QUERY_TYPES[0], settings=settings, file_resources=file_resources, functions=functions, database=database)
 
     try:
+      db.use(database)
       handle = db.client.query(query)
     except QueryServerException, ex:
       raise QueryError(ex.message)
@@ -147,7 +145,8 @@ class HS2Api(Api):
         'modified_row_count': handle.modified_row_count,
         'log_context': handle.log_context,
         'statement_id': statement_id,
-        'has_more_statements': statement_id < len(statements) - 1
+        'has_more_statements': statement_id < len(statements) - 1,
+        'statements_count': len(statements),
     }
 
   def _get_statements(self, hql_query):
@@ -291,6 +290,7 @@ class HS2Api(Api):
     snippet['result']['handle']['secret'], snippet['result']['handle']['guid'] = HiveServerQueryHandle.get_decoded(snippet['result']['handle']['secret'], snippet['result']['handle']['guid'])
     snippet['result']['handle'].pop('statement_id')
     snippet['result']['handle'].pop('has_more_statements')
+    snippet['result']['handle'].pop('statements_count')
     return HiveServerQueryHandle(**snippet['result']['handle'])
 
 

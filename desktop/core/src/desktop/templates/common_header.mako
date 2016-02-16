@@ -53,6 +53,7 @@ from django.utils.translation import ugettext as _
   <link href="${ static('desktop/ext/css/font-awesome.min.css') }" rel="stylesheet">
   <link href="${ static('desktop/css/hue3.css') }" rel="stylesheet">
   <link href="${ static('desktop/ext/css/fileuploader.css') }" rel="stylesheet">
+  <link href="${ static('desktop/css/perfect-scrollbar.min.css') }" rel="stylesheet">
 
   <style type="text/css">
     % if conf.CUSTOM.BANNER_TOP_HTML.get():
@@ -188,6 +189,7 @@ from django.utils.translation import ugettext as _
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery.total-storage.min.js') }"></script>
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery.placeholder.min.js') }"></script>
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery.dataTables.1.8.2.min.js') }"></script>
+  <script src="${ static('desktop/js/perfect-scrollbar.jquery.min.js') }"></script>
   <script src="${ static('desktop/ext/js/jquery/plugins/floatlabels.min.js') }"></script>
   <script src="${ static('desktop/js/jquery.datatables.sorting.js') }"></script>
   <script src="${ static('desktop/ext/js/bootstrap.min.js') }"></script>
@@ -205,6 +207,9 @@ from django.utils.translation import ugettext as _
     }
 
     $.fn.dataTableExt.sErrMode = "throw";
+
+    // sets global assistHelper TTL
+    $.totalStorage('hue.cacheable.ttl', ${conf.CUSTOM.CACHEABLE_TTL.get()});
 
     $(document).ready(function () {
       // forces IE's ajax calls not to cache
@@ -441,7 +446,7 @@ from django.utils.translation import ugettext as _
              % endif
            % endif
            % if 'pig' in apps:
-             % if USE_NEW_EDITOR.get():
+             % if USE_NEW_EDITOR.get() and False:
              <li><a href="${ url('notebook:editor') }?type=pig"><img src="${ static(apps['pig'].icon_path) }" class="app-icon"/> ${_('Pig')}</a></li>
              % else:
              <li><a href="/${apps['pig'].display_name}"><img src="${ static(apps['pig'].icon_path) }" class="app-icon"/> ${_('Pig')}</a></li>

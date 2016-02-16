@@ -219,6 +219,10 @@
     # e.g. WARNING: You are required to have authorization before you proceed
     ## login_splash_html=
 
+    # Cache timeout in milliseconds for the assist, autocomplete, etc.
+    # defaults to 86400000 (1 day), set to 0 to disable caching
+    ## cacheable_ttl=86400000
+
   # Configuration options for user authentication into the web application
   # ------------------------------------------------------------------------
   [[auth]]
@@ -461,7 +465,6 @@
     # postgresql_psycopg2, mysql, sqlite3 or oracle.
     #
     # Note that for sqlite3, 'name', below is a path to the filename. For other backends, it is the database name.
-    # Note that for MySQL, the default storage engine will be set to InnoDB
     # Note for Oracle, options={"threaded":true} must be set in order to avoid crashes.
     # Note for Oracle, you can use the Oracle Service Name by setting "port=0" and then "name=<host>:<port>/<service_name>".
     # Note for MariaDB use the 'mysql' engine.
@@ -792,7 +795,7 @@
 
   # A limit to the number of rows that can be downloaded from a query.
   # A value of -1 means there will be no limit.
-  # A maximum of 65,000 is applied to XLS downloads.
+  # A maximum of 30,000 is applied to XLS downloads.
   ## download_row_limit=1000000
 
   # Hue will try to close the Hive query when the user leaves the editor page.
@@ -802,6 +805,9 @@
   # Thrift version to use when communicating with HiveServer2.
   # New column format is from version 7.
   ## thrift_version=7
+
+  # A comma-separated list of white-listed Hive configuration properties that users are authorized to set.
+  # config_whitelist=hive.map.aggr,hive.exec.compress.output,hive.exec.parallel,hive.execution.engine,mapreduce.job.queuename
 
   [[ssl]]
     # Path to Certificate Authority certificates.
@@ -814,6 +820,9 @@
   # e.g. Used for LDAP/PAM pass-through authentication.
   ## auth_username=hue
   ## auth_password=
+
+  # Choose whether to show the new SQL editor.
+  ## use_new_editor=true
 
 
 ###########################################################################
@@ -1271,6 +1280,12 @@
 
   # Signed certificate to send along with encrypted metadata.
   ## cert_file=
+
+  # Path to a file containing the password private key.
+  ## key_file_password=/path/key
+
+  # Execute this script to produce the private key password. This will be used when `key_file_password` is not set.
+  ## key_file_password_script=/path/pwd.sh
 
   # A mapping from attributes in the response from the IdP to django user attributes.
   ## user_attribute_mapping={'uid': ('username', )}

@@ -178,20 +178,29 @@
 
     self.reload = function() {
       self.reloading(true);
-      self.assistHelper.clearCache({
+      huePubSub.publish('assist.clear.db.cache', {
         sourceType: self.type,
         clearAll: true
       });
       self.initDatabases();
     };
 
-    huePubSub.subscribe('assist.refresh', self.reload);
+    huePubSub.subscribe('assist.db.refresh', function (type) {
+      if (self.type === type) {
+        self.reload();
+      }
+    });
   }
 
   AssistDbSource.prototype.toggleSearch = function() {
     var self = this;
     self.isSearchVisible(!self.isSearchVisible());
     self.editingSearch(self.isSearchVisible());
+  };
+
+  AssistDbSource.prototype.triggerRefresh = function () {
+    var self = this;
+    huePubSub.publish('assist.db.refresh', self.type);
   };
 
   return AssistDbSource;

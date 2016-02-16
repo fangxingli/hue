@@ -153,6 +153,10 @@ Array.prototype.diff = function (a) {
     window.history.pushState(null, null, newURL);
   }
 
+  hueUtils.replaceURL = function (newURL) {
+    window.history.replaceState(null, null, newURL);
+  }
+
   /**
    * @param {string} pseudoJson
    * @constructor
@@ -242,7 +246,7 @@ var huePubSub = (function () {
 
   return {
     subscribe: function (topic, listener) {
-      if(! hOP.call(topics, topic)) {
+      if (!hOP.call(topics, topic)) {
         topics[topic] = [];
       }
 
@@ -255,20 +259,23 @@ var huePubSub = (function () {
       };
     },
     subscribeOnce: function (topic, listener) {
-      var ephemeral = this.subscribe(topic, function(){
+      var ephemeral = this.subscribe(topic, function () {
         listener.apply(arguments);
         ephemeral.remove();
       });
 
     },
     publish: function (topic, info) {
-      if (! hOP.call(topics, topic)) {
+      if (!hOP.call(topics, topic)) {
         return;
       }
 
       topics[topic].forEach(function (item) {
         item(info);
       });
+    },
+    getTopics: function () {
+      return topics;
     }
   };
 })();

@@ -81,12 +81,12 @@ ${ assist.assistPanel() }
   <table class="table table-striped table-condensed table-nowrap">
     <thead>
     <tr>
-      <th width="1%">&nbsp;</th>
+      <th width="2%">&nbsp;</th>
       ## no stats for partition key type
-      <th width="1%" class="no-sort">&nbsp;</th>
-      <th width="1%">&nbsp;</th>
+      <th width="2%" class="no-sort">&nbsp;</th>
+##       <th width="1%">&nbsp;</th>
       <th width="17%">${_('Name')}</th>
-      <th width="30%">${_('Type')}</th>
+      <th width="29%">${_('Type')}</th>
       <th width="50%">${_('Comment')}</th>
     </tr>
     </thead>
@@ -107,7 +107,7 @@ ${ assist.assistPanel() }
             assistHelper: table.assistHelper
           } }"></span>
         </td>
-        <td class="pointer" data-bind="click: function() { favourite(!favourite()) }"><i style="color: #338bb8" class="fa" data-bind="css: {'fa-star': favourite, 'fa-star-o': !favourite() }"></i></td>
+##         <td class="pointer" data-bind="click: function() { favourite(!favourite()) }"><i style="color: #338bb8" class="fa" data-bind="css: {'fa-star': favourite, 'fa-star-o': !favourite() }"></i></td>
         <td title="${ _("Scroll to the column") }">
           <a href="javascript:void(0)" class="column-selector" data-bind="text: name"></a>
         </td>
@@ -281,8 +281,8 @@ ${ assist.assistPanel() }
             <h3 id="dropDatabaseMessage">${ _('Do you really want to delete the database(s)?') }</h3>
           </div>
           <div class="modal-footer">
-            <input type="button" class="btn" data-dismiss="modal" value="Cancel">
-            <input type="submit" data-bind="click: function () { huePubSub.publish('assist.refresh'); selectedDatabases([]); return true; }" class="btn btn-danger" value="${_('Yes')}"/>
+            <input type="button" class="btn" data-dismiss="modal" value="${_('No')}">
+            <input type="submit" class="btn btn-danger" value="${_('Yes')}"/>
           </div>
           <!-- ko foreach: selectedDatabases -->
           <input type="hidden" name="database_selection" data-bind="value: name" />
@@ -372,19 +372,14 @@ ${ assist.assistPanel() }
                   <h3 id="dropTableMessage">${_('Do you really want to drop the selected table(s)?')}</h3>
                 </div>
                 <div class="modal-footer">
-                  <input type="button" class="btn" data-dismiss="modal" value="${_('Cancel')}" />
-                  <input type="submit" data-bind="click: function () { huePubSub.publish('assist.refresh'); selectedTables([]); return true; }" class="btn btn-danger" value="${_('Yes')}"/>
+                  <input type="button" class="btn" data-dismiss="modal" value="${_('No')}" />
+                  <input type="submit" class="btn btn-danger" value="${_('Yes')}"/>
                 </div>
                 <!-- ko foreach: selectedTables -->
                 <input type="hidden" name="table_selection" data-bind="value: name" />
                 <!-- /ko -->
               </form>
             </div>
-            % if is_optimizer_enabled:
-              <button class="btn toolbarBtn margin-left-20" title="${_('Browse the selected table in Optimizer')}" data-bind="click: function () { setTable(selectedTables()[0]); selectedTables([]); }, disable: selectedTables().length !== 1">
-                <i class="fa fa-eye"></i> ${_('View in Optimizer')}
-              </button>
-            % endif
           % endif
         </div>
 
@@ -394,13 +389,8 @@ ${ assist.assistPanel() }
             <th width="1%" style="text-align: center"><div class="hueCheckbox fa" data-bind="hueCheckAll: { allValues: filteredTables, selectedValues: selectedTables }"></div></th>
             <th>&nbsp;</th>
             <th>${ _('Table Name') }</th>
-            <th>${ _('Comment') }</th>
-            % if is_optimizer_enabled:
-            <th>${ _('Popularity') }</th>
-            <th>${ _('Column count') }</th>
-            <th>${ _('Fact / Dimension') }</th>
-            % endif
-            <th>${ _('Type') }</th>
+            <th width="50%">${ _('Comment') }</th>
+            <th width="1%">${ _('Type') }</th>
           </tr>
           </thead>
           <tbody data-bind="hueach: {data: filteredTables, itemHeight: 29, scrollable: '.right-panel', scrollableOffset: 277}">
@@ -421,12 +411,7 @@ ${ assist.assistPanel() }
                 <a class="tableLink" href="javascript:void(0);" data-bind="text: name, click: function() { $parent.setTable($data, function(){ huePubSub.publish('metastore.url.change'); }) }"></a>
               </td>
               <td data-bind="text: comment"></td>
-              % if is_optimizer_enabled:
-              <td>28% access (8)</td>
-              <td>15 columns</td>
-              <td>Dimension</td>
-              % endif
-              <td>
+              <td class="center">
                 <!-- ko if: type == 'Table' -->
                   <i class="fa fa-fw fa-table muted" title="${ _('Table') }"></i>
                 <!-- /ko -->
@@ -453,29 +438,29 @@ ${ assist.assistPanel() }
 
 <script type="text/html" id="metastore-databases-actions">
   <div class="inline-block pull-right">
-    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function () { huePubSub.publish('assist.refresh'); }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : $root.reloading }" title="${_('Refresh')}"></i></a>
+    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function () { huePubSub.publish('assist.db.refresh', 'hive'); }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : $root.reloading }" title="${_('Refresh')}"></i></a>
     % if has_write_access:
-    <a class="inactive-action margin-left-10" href="${ url('beeswax:create_database') }" title="${_('Create a new database')}"><i class="fa fa-plus-circle"></i></a>
+    <a class="inactive-action margin-left-10" href="${ url('beeswax:create_database') }" title="${_('Create a new database')}"><i class="fa fa-plus"></i></a>
     % endif
   </div>
 </script>
 
 <script type="text/html" id="metastore-tables-actions">
   <div class="inline-block pull-right">
-    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function () { huePubSub.publish('assist.refresh'); }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : $root.reloading }" title="${_('Refresh')}"></i></a>
+    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function () { huePubSub.publish('assist.db.refresh', 'hive'); }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : $root.reloading }" title="${_('Refresh')}"></i></a>
     % if has_write_access:
-    <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/beeswax/create/import_wizard/' + database().name }" title="${_('Create a new table from a file')}"><i class="fa fa-files-o"></i></a>
-    <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/beeswax/create/create_table/' + database().name }" title="${_('Create a new table manually')}"><i class="fa fa-wrench"></i></a>
+    <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/beeswax/create/import_wizard/' + database().name }" title="${_('Create a new table from a file')}"><span class="fa-stack fa-fw" style="width: 1.28571429em"><i class="fa fa-file-o fa-stack-1x"></i><i class="fa fa-plus-circle fa-stack-1x" style="font-size: 14px; margin-left: 5px; margin-top: 6px;"></i></span></a>
+    <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/beeswax/create/create_table/' + database().name }" title="${_('Create a new table manually')}"><i class="fa fa-plus"></i></a>
     % endif
   </div>
 </script>
 
 <script type="text/html" id="metastore-describe-table-actions">
   <div class="inline-block pull-right">
-    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function () { huePubSub.publish('assist.refresh'); }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : $root.reloading }" title="${_('Refresh')}"></i></a>
+    <a class="inactive-action" href="javascript:void(0)" data-bind="click: function () { huePubSub.publish('assist.db.refresh', 'hive'); }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : $root.reloading }" title="${_('Refresh')}"></i></a>
     <!-- ko with: database -->
     <!-- ko with: table -->
-    <a class="inactive-action margin-left-10" href="javascript: void(0);"><i class="fa fa-star"></i></a>
+##     <a class="inactive-action margin-left-10" href="javascript: void(0);"><i class="fa fa-star"></i></a>
     <a class="inactive-action margin-left-10" href="#" data-bind="click: showImportData" title="${_('Import Data')}"><i class="fa fa-upload"></i></a>
     <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/notebook/browse/' + database.name + '/' + name }" title="${_('Browse Data')}"><i class="fa fa-list"></i></a>
     % if has_write_access:
@@ -500,10 +485,10 @@ ${ assist.assistPanel() }
     <div class="span3 tile">
       <!-- ko template: 'metastore-table-stats' --><!-- /ko -->
     </div>
-    <div class="span6 tile">
-      <h4>${ _('Tagging') }</h4>
-      <div title="${ _('Tags') }"><i class="fa fa-fw fa-tags muted"></i> ${ _('No tags') }</div>
-    </div>
+    ## <div class="span6 tile">
+    ##  <h4>${ _('Tagging') }</h4>
+    ##  <div title="${ _('Tags') }"><i class="fa fa-fw fa-tags muted"></i> ${ _('No tags') }</div>
+    ## </div>
   </div>
 
   <div class="tile">
@@ -645,10 +630,10 @@ ${ assist.assistPanel() }
       <li><a href="#partitions" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-partitions'); }">${_('Partitions')} <span data-bind="text: '(' + partitions.values().length + ')'"></span></a></li>
     <!-- /ko -->
     <li><a href="#sample" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-sample'); }">${_('Sample')}</a></li>
-    <li><a href="#permissions" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-permissions'); }">${_('Permissions')}</a></li>
-    <li><a href="#queries" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-queries'); }">${_('Queries')}</a></li>
-    <li><a href="#analysis" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-analysis'); }">${_('Analyze')}</a></li>
-    <li><a href="#lineage" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-lineage'); }">${_('Lineage')}</a></li>
+    ## <li><a href="#permissions" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-permissions'); }">${_('Permissions')}</a></li>
+    ## <li><a href="#queries" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-queries'); }">${_('Queries')}</a></li>
+    ## <li><a href="#analysis" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-analysis'); }">${_('Analyze')}</a></li>
+    ## <li><a href="#lineage" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-lineage'); }">${_('Lineage')}</a></li>
     <li><a href="#details" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-details'); }">${ _('Details') }</a></li>
   </ul>
 
@@ -754,7 +739,7 @@ ${ assist.assistPanel() }
   </div>
 
   <div id="dropSingleTable" class="modal hide fade">
-    <form method="POST" data-bind="attr: { 'action': '/metastore/tables/drop/' + (database() ? database().name : '') }">
+    <form method="POST">
       ${ csrf_token(request) | n,unicode }
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
@@ -764,15 +749,9 @@ ${ assist.assistPanel() }
         <div>${_('Do you really want to drop the table')} <span style="font-weight: bold;" data-bind="text: database() && database().table() ? database().table().name : ''"></span>?</div>
       </div>
       <div class="modal-footer">
-        <input type="button" class="btn" data-dismiss="modal" value="${_('Cancel')}"/>
-        <input type="submit" data-bind="click: function () { huePubSub.publish('assist.refresh'); return true; }" class="btn btn-danger" value="${_('Yes, drop this table')}"/>
-      </div>
-      <div class="hide">
-        <!-- ko with: database -->
-        <!-- ko with: table -->
-        <input type="hidden" name="table_selection" data-bind="value: name" />
-        <!-- /ko -->
-        <!-- /ko -->
+        <input type="hidden" name="table_selection" data-bind="value: database() && database().table() ? database().table().name : ''" />
+        <input type="button" class="btn" data-dismiss="modal" value="${_('No')}"/>
+        <input type="submit" data-bind="click: function (vm, e) { var $form = $(e.target).parents('form'); $form.attr('action', '/metastore/tables/drop/' + vm.database().name); return true; }" class="btn btn-danger" value="${_('Yes, drop this table')}"/>
       </div>
     </form>
   </div>
@@ -812,6 +791,11 @@ ${ assist.assistPanel() }
       var viewModel = new MetastoreViewModel(options);
 
       ko.applyBindings(viewModel);
+
+      if (location.getParameter('refresh') === 'true') {
+        huePubSub.publish('assist.db.refresh', 'hive');
+        hueUtils.replaceURL('?');
+      }
 
       // TODO: Use ko for this and the put the queries in the MetastoreTable
       $('a[data-toggle="tab"]').on('shown', function (e) {

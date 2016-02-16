@@ -36,6 +36,8 @@
     self.handle = ko.observable(typeof result.handle != "undefined" && result.handle != null ? result.handle : {});
     self.meta = ko.observableArray(typeof result.meta != "undefined" && result.meta != null ? result.meta : []);
     self.hasMore = ko.observable(typeof result.hasMore != "undefined" && result.hasMore != null ? result.hasMore : false);
+    self.statement_id = ko.observable(typeof result.statement_id != "undefined" && result.statement_id != null ? result.statement_id : 0);
+    self.statements_count = ko.observable(typeof result.statements_count != "undefined" && result.statements_count != null ? result.statements_count : 1);
     self.cleanedMeta = ko.computed(function () {
       return ko.utils.arrayFilter(self.meta(), function (item) {
         return item.name != ''
@@ -155,7 +157,7 @@
     self.name = ko.observable(typeof snippet.name != "undefined" && snippet.name != null ? snippet.name : '');
     self.type = ko.observable(typeof snippet.type != "undefined" && snippet.type != null ? snippet.type : 'hive');
 
-    //Ace stuff
+    // Ace stuff
     self.ace = ko.observable(null);
     self.errors = ko.observableArray([]);
 
@@ -165,6 +167,8 @@
     self.getAceMode = function() {
       return vm.getSnippetViewSettings(self.type()).aceMode;
     };
+
+    self.dbSelectionVisible = ko.observable(false);
 
     self.isSqlDialect = ko.pureComputed(function () {
       return vm.getSnippetViewSettings(self.type()).sqlDialect;
@@ -193,6 +197,62 @@
         self.availableDatabases([]);
       }
     };
+
+    self.currentQueryTab = ko.observable('queryHistory');
+
+    self.errorLoadingQueries = ko.observable(false);
+    self.loadingQueries = ko.observable(false);
+
+    self.queriesHasErrors = ko.observable(false);
+    self.queriesCurrentPage = ko.observable(1);
+    self.queriesTotalPages = ko.observable(1);
+    self.queries = ko.observableArray();
+
+    var fetchQueries = function () {
+      if (self.loadingQueries()) {
+        return;
+      }
+      lastQueriesPage = self.queriesCurrentPage();
+      self.loadingQueries(true);
+      self.queriesHasErrors(false);
+      self.getAssistHelper().searchDocuments({
+        successCallback: function (result) {
+          self.queriesTotalPages(Math.ceil(result.count / 25));
+          self.queries(result.documents);
+          self.loadingQueries(false);
+          self.queriesHasErrors(false);
+        },
+        errorCallback: function () {
+          self.loadingQueries(false);
+          self.queriesHasErrors(true);
+        },
+        page: self.queriesCurrentPage(),
+        limit: 25,
+        type: 'query-' + self.type()
+      });
+    }
+
+    var lastQueriesPage = 1;
+    self.currentQueryTab.subscribe(function (newValue) {
+      if (newValue === 'savedQueries' && (self.queries().length === 0 || lastQueriesPage !== self.queriesCurrentPage())) {
+        fetchQueries();
+      }
+    });
+
+    self.prevQueriesPage = function () {
+      if (self.queriesCurrentPage() !== 1) {
+        self.queriesCurrentPage(self.queriesCurrentPage() - 1);
+        fetchQueries();
+      }
+    };
+
+    self.nextQueriesPage = function () {
+      if (self.queriesCurrentPage() !== self.queriesTotalPages()) {
+        self.queriesCurrentPage(self.queriesCurrentPage() + 1);
+        fetchQueries();
+      }
+    };
+
 
     self.isSqlDialect.subscribe(updateDatabases);
     updateDatabases();
@@ -397,7 +457,8 @@
         status: self.status,
         statement: self.statement,
         properties: self.properties,
-        result: self.result.getContext()
+        result: self.result.getContext(),
+        database: self.database
       };
     };
 
@@ -450,7 +511,7 @@
       $(document).trigger("executeStarted", self);
       self.lastExecuted = now;
       $(".jHueNotify").hide();
-      logGA('/execute/' + self.type());
+      logGA('execute/' + self.type());
 
       self.status('running');
       self.errors([]);
@@ -471,6 +532,12 @@
           self.result.clear();
           self.result.handle(data.handle);
           self.result.hasResultset(data.handle.has_result_set);
+          if (data.handle.statements_count != null) {
+            self.result.statements_count(data.handle.statements_count);
+          }
+          if (data.handle.statement_id != null) {
+            self.result.statement_id(data.handle.statement_id);
+          }
           if (data.handle.sync) {
             self.loadData(data.handle, 100);
             self.status('success');
@@ -515,6 +582,7 @@
           self.ace().setValue(self.statement_raw(), 1);
         }
       }
+      logGA('format');
     };
 
     self.fetchResult = function (rows, startOver) {
@@ -526,6 +594,7 @@
     };
 
     self.fetchResultData = function (rows, startOver) {
+      logGA('fetchResult/' + rows + '/' + startOver);
       $.post("/notebook/api/fetch_result_data", {
         notebook: ko.mapping.toJSON(notebook.getContext()),
         snippet: ko.mapping.toJSON(self.getContext()),
@@ -609,7 +678,7 @@
             self.fetchResult(100);
             self.progress(100);
             if (self.isSqlDialect() && ! self.result.handle().has_result_set) { // DDL
-              huePubSub.publish('assist.refresh');
+              huePubSub.publish('assist.db.refresh', self.type());
               if (self.result.handle().has_more_statements) {
                 setTimeout(function () {
                   self.execute(); // Execute next, need to wait as we disabled fast click
@@ -636,6 +705,7 @@
         clearTimeout(self.checkStatusTimeout);
         self.checkStatusTimeout = null;
       }
+      logGA('cancel');
 
       $.post("/notebook/api/cancel_statement", {
         notebook: ko.mapping.toJSON(notebook.getContext()),
@@ -771,12 +841,8 @@
     });
 
     self.history = ko.observableArray([]);
+    // TODO: Move showHistory, fetchHistory and clearHistory into the Snippet and drop self.selectedSnippet
     self.showHistory = ko.observable(typeof notebook.showHistory != "undefined" && notebook.showHistory != null ? notebook.showHistory : false);
-    self.showHistory.subscribe(function (val) {
-      if (val) {
-        self.fetchHistory();
-      }
-    });
 
     self.getSession = function (session_type) {
       var _s = null;
@@ -876,7 +942,7 @@
 
       $.post("/notebook/api/create_session", {
         notebook: ko.mapping.toJSON(self.getContext()),
-        session: ko.mapping.toJSON(session) // e.g. {'type': 'hive', 'properties': [{'name': driverCores', 'value', '2'}]}
+        session: ko.mapping.toJSON(session) // e.g. {'type': 'pyspark', 'properties': [{'name': driverCores', 'value', '2'}]}
         }, function (data) {
           if (data.status == 0) {
             ko.mapping.fromJS(data.session, {}, session);
@@ -930,7 +996,7 @@
         }
       }, 100);
 
-      logGA('/add_snippet/' + type);
+      logGA('add_snippet/' + (type ? type : self.selectedSnippet()));
       return snippet;
     };
 
@@ -950,16 +1016,6 @@
          sessions: self.sessions
       };
     };
-
-    // Init
-    if (notebook.snippets) {
-      $.each(notebook.snippets, function (index, snippet) {
-        self.addSnippet(snippet);
-      });
-      if (vm.editorMode && notebook.snippets.length == 0) {
-        self.showHistory(true); // Show history when new query
-      }
-    }
 
     self.save = function () {
       $.post("/notebook/api/notebook/save", {
@@ -1062,6 +1118,12 @@
       });
     };
 
+    self.showHistory.subscribe(function (val) {
+      if (val) {
+        self.fetchHistory();
+      }
+    });
+
     self.clearHistory = function (type) {
       $.post("/notebook/api/clear_history", {
         notebook: ko.mapping.toJSON(self.getContext()),
@@ -1120,6 +1182,20 @@
         });
       }
     });
+
+    // Init
+    if (notebook.snippets) {
+      $.each(notebook.snippets, function (index, snippet) {
+        self.addSnippet(snippet);
+      });
+      if (vm.editorMode) {
+        if (notebook.snippets.length == 0) {
+          self.showHistory(true); // Show history when new query
+        } else if (self.showHistory()) {
+          self.fetchHistory(); // Show on saved query with history selected
+        }
+      }
+    }
   };
 
 
