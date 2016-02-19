@@ -244,11 +244,11 @@ ${ assist.assistPanel() }
         _filters.forEach(function (filter) {
           _postData[filter.column] = filter.value;
         });
-        _postData["sort"] = viewModel.sortDesc() ? "desc" : "asc";
+        _postData["sort"] = self.sortDesc() ? "desc" : "asc";
 
         $.ajax({
           type: "POST",
-          url: "/metastore/table/default/blog/partitions",
+          url: '/metastore/table/' + '${ database }' + '/' + '${ table.name }' + '/partitions',
           data: _postData,
           success: function (data) {
             self.values(data.partition_values_json);
