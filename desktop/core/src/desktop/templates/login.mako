@@ -40,7 +40,7 @@ ${ commonheader(_("Welcome to Hue"), "login", user, "50px", True) | n,unicode }
       ${ csrf_token(request) | n,unicode }
 
       <div class="login-header">
-        <h1>${ _('Welcome to Hue') }</h1>
+        <h1>${_('Welcome to Hue')}</h1>
         %if first_login_ever:
           <h2>${_('Create your Hue account')}</h2>
         %else:

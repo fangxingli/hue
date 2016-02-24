@@ -7,12 +7,6 @@ ${shared.menubar(section='mytab')}
 ## Use double hashes for a mako template comment
 ## Main body
 
-<div class="container-fluid">
-  <div class="card">
-    <h2 class="card-heading simple">Boc app is successfully setup!</h2>
-    <div class="card-body">
-      <p>It's now ${date}.</p>
-    </div>
-  </div>
-</div>
+<iframe style="width: 100%; height:900px;" frameBorder=0 src='/boc/query'></iframe>
+
 ${commonfooter(request, messages) | n,unicode}

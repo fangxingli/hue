@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <link rel="icon" href="../../favicon.ico">
+
+    <title>中国银行大数据查询系统</title>
+    {% load static %}
+    <!-- Bootstrap core CSS -->
+    <link href="{% static 'bootstrap/dist/css/bootstrap.min.css' %}" rel="stylesheet">
+
+    <link href="{% static 'datatables/media/css/jquery.dataTables.min.css' %}" rel="stylesheet">
+    <link href="{% static 'wansan/css/buttons.dataTables.min.css' %}" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'jquery-ui/themes/smoothness/jquery-ui.css' %}">
+
+    <!-- Just for debugging purposes. Don't actually copy these 2 lines! -->
+    <!--[if lt IE 9]>{#<script src="{% static 'wansan/js/ie8-responsive-file-warning.js' %}"></script>#}<![endif]-->
+    <script src="{% static 'wansan/js/ie-emulation-modes-warning.js' %}"></script>
+
+    <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
+    <!--[if lt IE 9]>
+      <script src="{% static 'html5shiv/dist/html5shiv.min.js' %}"></script>
+      <script src={% static 'respond/dest/respond.min.js' %}"></script>
+    <![endif]-->
+    <link href="{% static 'wansan/css/custom.css' %}" rel="stylesheet">
+</head>
+
+<body>
+
+<!-- Static navbar -->
+<nav class="navbar navbar-default navbar-static-top">
+    <div class="container">
+        <div class="navbar-header">
+            <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar"
+                    aria-expanded="false" aria-controls="navbar">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <a class="" href="#" style="margin-right: 50px;"><img src="{% static 'wansan/img/log.jpeg' %}" style="max-height: 44px; margin:3px 0 3px 0;"></a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+            <ul class="nav navbar-nav">
+                <li class="active"><a href="#">查询系统</a></li>
+                <li><a href="#about">数据治理系统</a></li>
+                <li><a href="#contact">数据管控系统</a></li>
+                <li><a href="#contact">大数据监测平台</a></li>
+            </ul>
+            <ul class="nav navbar-nav navbar-right">
+                <li role="presentation" class="dropdown">
+                    <a href="#" data-toggle="dropdown" class="dropdown-toggle" role="button" aria-haspopup="true" aria-expanded="false"><span style="font-size:16px;" class="glyphicon glyphicon-user" aria-hidden="true"></span>操作 <span class="caret"></a>
+                    <ul class="dropdown-menu">
+                        <li><a href="/admin">管理</a></li>
+                        <li><a href="#">设置</a></li>
+                        <li role="separator" class="divider"></li>
+                        <li><a href="#">退出</a></li>
+                    </ul>
+{#                    <button type="button" class="btn btn-primary"><span>退出</span> <span style="font-size:16px;" class="glyphicon glyphicon-log-out" aria-hidden="true"></span></button>#}
+                </li>
+            </ul>
+        </div><!--/.nav-collapse -->
+    </div>
+</nav>
+<div class="container">
+    <ul class="nav nav-pills">
+        {% for cate, subcates in cates_stack %}
+            <li role="presentation" class="dropdown {% if cate == '对私查询' %}active{% endif %}">
+                <a class="dropdown-toggle" data-toggle="dropdown" href="#" role="button" aria-haspopup="true" aria-expanded="false">{{ cate }} {% if subcate.length > 0 %}<span class="caret">{% endif %}</a>
+                {% if subcate.length > 0 %}
+                <ul class="dropdown-menu">
+                    {% for subcate in subcates %}
+                        <li><a href="#">{{ subcate }}</a></li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- 证件号码，客户名称，客户号，账号，卡号 -->
+<div style="background: #f8f8f8; padding-top:10px;">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-2" id="sidebar">
+                <div class="panel panel-default" style="padding:5px;">
+                    <ul class="nav nav-pills nav-stacked">
+                        <li role="presentation"><a href="#">客户信息查询</a></li>
+                        <li role="presentation"><a href="#">账户信息查询</a></li>
+                        <!--<li role="presentation"><a href="#">账户信息查询(新线)</a></li>-->
+                        <li role="presentation" class="active"><a href="#">历史交易查询</a></li>
+                        <!--<li role="presentation"><a href="#">历史交易查询(新线)</a></li>-->
+                    </ul>
+                </div>
+            </div>
+            <div class="col-md-10" id="search-content">
+                <div class="panel panel-default" style="padding:10px;">
+                    <form data-bind="submit: query">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="form-inline">
+                                    <div class="form-group padding-bottom-10">
+                                        <label for="inputEmail3" class="control-label">证件号码:</label>
+                                        <input type="text" class="form-control" id="cred_num" data-bind="value: cred_num" placeholder="证件号码">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="form-inline">
+                                    <div class="form-group padding-bottom-10" >
+                                        <label for="inputEmail3" class="control-label">交易日期:</label>
+                                        <input type="text" class="form-control" id="date_begin" data-bind="value: date_begin" placeholder="开始日期"> -
+                                        <input type="text" class="form-control" id="date_end" data-bind="value: date_end" placeholder="结束日期">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-offset-8 col-md-4">
+                                <button type="submit" class="btn btn-primary pull-right" data-bind="text: queryText, css: cssDisable">
+                                    查询
+                                </button>
+                                <button type="button" data-bind="click: ggg">asdf</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="panel panel-default" style="padding:10px;">
+                    <table id="table" class="display" style="width:100%; white-space:nowrap;"></table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap core JavaScript
+================================================== -->
+<!-- Placed at the end of the document so the pages load faster -->
+<script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
+{#<script src="http://apps.bdimg.com/libs/jquery/1.11.3/jquery.min.js"></script>#}
+<script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
+<!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+<script src="../../assets/js/ie10-viewport-bug-workaround.js"></script>
+<script src="{% static 'datatables/media/js/jquery.dataTables.min.js' %}"></script>
+<script src="{% static 'datatables.net-buttons/js/dataTables.buttons.min.js' %}"></script>
+<script src="{% static 'datatables.net-buttons/js/buttons.html5.min.js' %}"></script>
+<script src="{% static 'datatables.net-buttons/js/buttons.flash.min.js' %}"></script>
+<script src="{% static 'datatables.net-buttons/js/buttons.print.min.js' %}"></script>
+<script src="{% static 'jquery-ui/jquery-ui.min.js' %}"></script>
+<script src="{% static 'knockout/dist/knockout.js' %}"></script>
+<script src="{% static 'knockout-validation/dist/knockout.validation.min.js' %}"></script>
+
+<script language="javascript">
+    var t = $('#table').dataTable({
+        'columns': [
+            {'data': 'fd_id_no_new', 'title': '证件号'},
+            {'data': 'fd_cus_name', 'title': '姓名'},
+            {'data': 'dtbl_act_no', 'title': '旧线交易账号'},
+            {'data': 'fd_new_no', 'title': '对应新线账号'},
+            {'data': 'dtbl_txn_date', 'title': '交易日期'},
+            {'data': 'dtbl_proc_seq', 'title': '交易序号'},
+            {'data': 'dtbl_cuu_code', 'title': '交易货币'},
+            {'data': 'dtbl_txn_sdn', 'title': '交易网点号'},
+            {'data': 'dtbl_txn_trm', 'title': '交易终端'},
+            {'data': 'dtbl_txn_code', 'title': '交易代码'},
+            {'data': 'dtbl_db_cr', 'title': '借贷别'},
+            {'data': 'dtbl_txn_amt', 'title': '交易金额'},
+            {'data': 'dtbl_new_bal', 'title': '账户余额'}
+        ],
+        "language": {
+            "url": "{% static 'wansan/js/language.zh-cn.json' %}"
+        },
+        'columnDefs':[],
+        'pageLength': 30,
+        'scrollX': true,
+        'scrollY': "900px",
+        'scrollCollapse': true,
+        'dom': 'Bfrtip',
+        'buttons': [
+            {
+                text: "<div class='excel_export' id='excel_1'>导出Excel</div>",
+                action: function (e, dt, button, config) {
+
+                }
+            },
+            {
+                extend: 'print',
+                text: '打印'
+            }
+        ]
+    });
+
+
+    $("#date_begin").datepicker({//添加日期选择功能
+        numberOfMonths: 1,//显示几个月
+        showButtonPanel: true,//是否显示按钮面板
+        dateFormat: 'yy-mm-dd',//日期格式
+        clearText: "清除",//清除日期的按钮名称
+        closeText: "关闭",//关闭选择框的按钮名称
+        yearSuffix: '年', //年的后缀
+        minDate: '2003-01-01',
+        maxDate: '2008-03-31',
+        currentText: '今天',
+        showMonthAfterYear: true,//是否把月放在年的后面
+        monthNames: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+        dayNames: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+        dayNamesShort: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
+        dayNamesMin: ['日', '一', '二', '三', '四', '五', '六'],
+    });
+    $("#date_end").datepicker({//添加日期选择功能
+        numberOfMonths: 1,//显示几个月
+        showButtonPanel: true,//是否显示按钮面板
+        dateFormat: 'yy-mm-dd',//日期格式
+        minDate: '2003-01-01',
+        maxDate: '2008-12-31',
+        clearText: "清除",//清除日期的按钮名称
+        closeText: "关闭",//关闭选择框的按钮名称
+        currentText: "今天",
+        yearSuffix: '年', //年的后缀
+        showMonthAfterYear: true,//是否把月放在年的后面
+        monthNames: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+        dayNames: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+        dayNamesShort: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
+        dayNamesMin: ['日', '一', '二', '三', '四', '五', '六'],
+    });
+
+    var viewModel = {
+        queryText : ko.observable("查询"),
+        cssDisable : ko.pureComputed({
+            read: function(){
+                return viewModel.errors().length > 0 ? 'disabled':'';
+            },
+            write: function(value){
+                return value;
+            }
+        }),
+        cred_num : ko.observable("").extend({
+            required: {
+                message: ' 必填字段'
+            }
+        }),
+        custom_name: ko.observable(""),
+        date_begin: ko.observable(""),
+        date_end : ko.observable(""),
+
+        ggg: function(data, event){
+            event.preventDefault();
+            $("#sidebar").toggleClass("col-md-2 display-none");
+            $("#search-content").toggleClass("col-md-10 col-md-12");
+        },
+
+        query : function(){
+            var self = this;
+            var btime = new Date();
+            if( viewModel.errors().length > 0 ){
+                return;
+            }
+            self.queryText("查询中...");
+            self.cssDisable("disabled");
+            t.fnClearTable();
+            t.fnDraw();
+            $(".dataTables_empty").text("查询中,请稍等..."); //在查询时替换空结果语句
+            $.post('/get_hive',
+                    {
+                        'a.fd_id_no_new': self.cred_num(),
+                        'a.fd_cus_name': self.custom_name(),
+                        'date_begin': self.date_begin(),
+                        'date_end': self.date_end(),
+                    },
+                    function (data) {
+                        self.queryText("查询");
+                        self.cssDisable("");
+                        t.fnClearTable();
+                        $(".excel_export").parent().parent().click(function(){
+                            $("#my_iframe").attr('src', "/static/" + data.excel_id);
+                        });
+                        if (data.data.length > 0) {
+                            t.fnAddData(data.data);
+                        }
+                        t.fnDraw();
+ 			            var info = $(".dataTables_info").text();
+			            $(".dataTables_info").text(info + ', 共耗时: ' + (new Date()-btime)/1000 + '秒')
+                    },
+                    'json'
+            );
+        }
+    };
+
+    viewModel.errors = ko.validation.group(viewModel);
+
+    viewModel.requireLocation = function() {
+        viewModel.location.extend({required: true});
+    };
+
+    ko.applyBindings(viewModel);
+</script>
+<iframe id="my_iframe" style="display:none;"></iframe>
+</body>
+</html>

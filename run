@@ -1,0 +1,2 @@
+#!/bin/sh
+./hue runserver 0.0.0.0:9898

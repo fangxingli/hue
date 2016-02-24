@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+from django.conf.urls import patterns, include, url
+from django.contrib import admin
+from django.views.generic import TemplateView
 # Licensed to Cloudera, Inc. under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,8 +17,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from django.conf.urls import patterns, url
 
 urlpatterns = patterns('boc',
-  url(r'^$', 'views.index'),
+    url(r'^$', 'views.index'),
+    #url(r'^admin/', include(admin.site.urls)),
+    #url(r'^get_hive', 'boc.views.get_hive', name='get_hive'),
+    url(r'^query$', 'views.query', name='query'),
 )
+
