@@ -91,6 +91,12 @@ HTTP_ALLOWED_METHODS = Config(
   private=True,
   default=['OPTIONS', 'GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT'])
 
+X_FRAME_OPTIONS = Config(
+  key="http_x_frame_options",
+  help=_("X-Frame-Options HTTP header value."),
+  type=str,
+  default="SAMEORIGIN")
+
 SSL_CERTIFICATE = Config(
   key="ssl_certificate",
   help=_("Filename of SSL Certificate"),
@@ -1069,6 +1075,13 @@ DJANGO_EMAIL_BACKEND = Config(
   help=_("The email backend to use."),
   type=str,
   default="django.core.mail.backends.smtp.EmailBackend"
+)
+
+USE_NEW_EDITOR = Config( # To remove in Hue 4
+  key='use_new_editor',
+  default=True,
+  type=coerce_bool,
+  help=_('Choose whether to show the new SQL editor.')
 )
 
 def validate_ldap(user, config):

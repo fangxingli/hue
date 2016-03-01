@@ -265,10 +265,15 @@ def save_file(request):
     encoding = form.cleaned_data['encoding']
     data = form.cleaned_data['contents'].encode(encoding)
 
-    if request.fs.exists(path):
-        do_overwrite_save(request.fs, path, data)
-    else:
-        request.fs.create(path, overwrite=False, data=data)
+    try:
+        if request.fs.exists(path):
+            do_overwrite_save(request.fs, path, data)
+        else:
+            request.fs.create(path, overwrite=False, data=data)
+    except WebHdfsException, e:
+        raise PopupException(_("The file could not be saved"), detail=e.message.splitlines()[0])
+    except Exception, e:
+        raise PopupException(_("The file could not be saved"), detail=e)
 
     messages.info(request, _('Saved %(path)s.') % {'path': os.path.basename(path)})
     request.path = reverse("filebrowser.views.edit", kwargs=dict(path=path))
@@ -1145,9 +1150,6 @@ def upload_file(request):
     else:
         response['data'] = _('A POST request is required.')
 
-    if response['status'] == 0:
-        request.info(_('%(destination)s upload succeeded') % {'destination': response['path']})
-
     return HttpResponse(json.dumps(response), content_type="text/plain")
 
 def _upload_file(request):
@@ -1223,11 +1225,6 @@ def upload_archive(request):
                 hdfs_file.remove()
     else:
         response['data'] = _('A POST request is required.')
-
-    if response['status'] == 0:
-        request.info(_('%(destination)s upload succeeded.') % {'destination': response['path']})
-    else:
-        request.error(_('Upload failed: %(data)s.') % {'data': response['data']})
 
     return HttpResponse(json.dumps(response), content_type="text/plain")
 

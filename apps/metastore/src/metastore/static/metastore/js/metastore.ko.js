@@ -126,6 +126,7 @@
 
   MetastoreDatabase.prototype.setTable = function (metastoreTable, callback) {
     var self = this;
+    huePubSub.publish('metastore.scroll.to.top');
     self.table(metastoreTable);
     if (!metastoreTable.loaded()) {
       metastoreTable.load();
@@ -258,6 +259,8 @@
     self.loaded = ko.observable(false);
     self.loading = ko.observable(false);
 
+    self.loadingDetails = ko.observable(false);
+    self.loadingColumns = ko.observable(false);
     self.columns = ko.observableArray();
     self.favouriteColumns = ko.observableArray();
     self.samples = new MetastoreTableSamples({
@@ -310,12 +313,14 @@
 
     self.fetchFields = function () {
       var self = this;
+      self.loadingColumns(true);
       self.assistHelper.fetchFields({
         sourceType: "hive",
         databaseName: self.database.name,
         tableName: self.name,
         fields: [],
         successCallback: function (data) {
+          self.loadingColumns(false);
           self.columns($.map(data.extended_columns, function (column) {
             return new MetastoreColumn({
               extendedColumn: column,
@@ -323,17 +328,22 @@
             })
           }));
           self.favouriteColumns(self.columns().slice(0, 3));
+        },
+        errorCallback: function () {
+          self.loadingColumns(false);
         }
       })
     };
 
     self.fetchDetails = function () {
       var self = this;
+      self.loadingDetails(true);
       self.assistHelper.fetchTableDetails({
         sourceType: "hive",
         databaseName: self.database.name,
         tableName: self.name,
         successCallback: function (data) {
+          self.loadingDetails(false);
           if ((typeof data === 'object') && (data !== null)) {
             self.tableDetails(data);
             self.tableStats(data.details.stats);
@@ -356,6 +366,7 @@
         },
         errorCallback: function (data) {
           self.refreshingTableStats(false);
+          self.loadingDetails(false);
           self.loading(false);
         }
       })
@@ -364,9 +375,11 @@
 
   MetastoreTable.prototype.showImportData = function () {
     var self = this;
-    $.get('/metastore/table/' + self.database.name + '/' + self.name + '/load', function (response) {
-      $("#import-data-modal").html(response['data']);
+    $.get('/metastore/table/' + self.database.name + '/' + self.name + '/load', function (data) {
+      $("#import-data-modal").html(data['data']);
       $("#import-data-modal").modal("show");
+    }).fail(function (xhr, textStatus, errorThrown) {
+      $(document).trigger("error", xhr.responseText);
     });
   };
 
@@ -397,12 +410,18 @@
       $.post('/metastore/table/' + self.table.database.name + '/' + self.table.name + '/alter_column', {
         column: self.name(),
         comment: newValue
-      }, function () {
-        huePubSub.publish('assist.clear.db.cache', {
-          sourceType: 'hive',
-          databaseName: self.table.database.name,
-          tableName: self.table.name
-        });
+      }, function (data) {
+        if (data.status == 0) {
+          huePubSub.publish('assist.clear.db.cache', {
+            sourceType: 'hive',
+            databaseName: self.table.database.name,
+            tableName: self.table.name
+          });
+        } else {
+          $(document).trigger("error", data.message);
+        }
+      }).fail(function (xhr, textStatus, errorThrown) {
+        $(document).trigger("error", xhr.responseText);
       });
     })
   }
@@ -426,6 +445,12 @@
     self.isLeftPanelVisible = ko.observable();
     self.assistHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
 
+    huePubSub.subscribe("assist.db.panel.ready", function () {
+      huePubSub.publish('assist.set.database', {
+        source: 'hive',
+        name: null
+      });
+    });
 
     self.reloading = ko.observable(false);
     self.loading = ko.observable(false);
@@ -602,10 +627,12 @@
           setDatabaseByName(path[3]);
           break;
         case 'table':
-          loadTableDef({
-            name: path[4],
-            database: path[3]
-          });
+          window.setTimeout(function() {
+            loadTableDef({
+              name: path[4],
+              database: path[3]
+            });
+          }, 200);
           break;
       }
     }
@@ -630,6 +657,7 @@
 
   MetastoreViewModel.prototype.setDatabase = function (metastoreDatabase, callback) {
     var self = this;
+    huePubSub.publish('metastore.scroll.to.top');
     self.database(metastoreDatabase);
 
     if (!metastoreDatabase.loaded()) {

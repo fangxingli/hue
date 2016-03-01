@@ -33,10 +33,12 @@ from django.test.client import Client
 
 import desktop.conf
 from desktop.lib.django_test_util import make_logged_in_client
+from desktop.lib.test_utils import grant_access
 from desktop.views import home
 from hadoop import pseudo_hdfs4
 
 import useradmin.conf
+from useradmin.forms import UserChangeForm
 import useradmin.ldap_access
 from useradmin.models import HuePermission, GroupPermission, UserProfile
 from useradmin.models import get_profile, get_default_user_group
@@ -581,7 +583,7 @@ class TestUserAdmin(BaseUserAdminTests):
       assert_equal(["Passwords do not match."], response.context["form"]["password2"].errors, "Should have complained about mismatched password")
       # Old password not confirmed
       response = c.post('/useradmin/users/edit/test', dict(username="test", first_name="Tom", last_name="Tester", password1="foo", password2="foo", is_active=True, is_superuser=True))
-      assert_equal(["The old password does not match the current password."], response.context["form"]["password_old"].errors, "Should have complained about old password")
+      assert_equal([UserChangeForm.GENERIC_VALIDATION_ERROR], response.context["form"]["password_old"].errors, "Should have complained about old password")
       # Good now
       response = c.post('/useradmin/users/edit/test', dict(username="test", first_name="Tom", last_name="Tester", password1="foo", password2="foo", password_old="test", is_active=True, is_superuser=True))
       assert_true(User.objects.get(username="test").is_superuser)
@@ -599,7 +601,7 @@ class TestUserAdmin(BaseUserAdminTests):
 
       # Create a new regular user (duplicate name)
       response = c.post('/useradmin/users/new', dict(username="test", password1="test", password2="test"))
-      assert_equal({ 'username': ["User with this Username already exists."]}, response.context["form"].errors)
+      assert_equal({ 'username': [UserChangeForm.GENERIC_VALIDATION_ERROR]}, response.context["form"].errors)
 
       # Create a new regular user (for real)
       response = c.post('/useradmin/users/new', dict(username=FUNNY_NAME,
@@ -728,6 +730,27 @@ class TestUserAdmin(BaseUserAdminTests):
     assert_equal([u'test_list_for_autocomplete', u'test_list_for_autocomplete2'], users)
     assert_true(u'test_list_for_autocomplete' in groups, groups)
     assert_true(u'test_list_for_autocomplete_other_group' in groups, groups)
+
+
+  def test_language_preference(self):
+    # Test that language selection appears in Edit Profile for current user
+    client = make_logged_in_client('test', is_superuser=False, groupname='test')
+    user = User.objects.get(username='test')
+    grant_access('test', 'test', 'useradmin')
+
+    response = client.get('/useradmin/users/edit/test')
+    assert_true("Language Preference" in response.content)
+
+    # Does not appear for superuser editing other profiles
+    other_client = make_logged_in_client('test_super', is_superuser=True, groupname='test')
+    superuser = User.objects.get(username='test_super')
+
+    response = other_client.get('/useradmin/users/edit/test')
+    assert_false("Language Preference" in response.content, response.content)
+
+    # Changing language preference will change language setting
+    response = client.post('/useradmin/users/edit/test', dict(language='ko'))
+    assert_true('<option value="ko" selected="selected">Korean</option>' in response.content)
 
 
 class TestUserAdminWithHadoop(BaseUserAdminTests):

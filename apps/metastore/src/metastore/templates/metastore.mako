@@ -15,10 +15,12 @@
 ## limitations under the License.
 <%!
 from django.utils.html import escape
+from django.utils.translation import ugettext as _
+
 from desktop import conf
+from desktop.conf import USE_NEW_EDITOR
 from desktop.lib.i18n import smart_unicode
 from desktop.views import commonheader, commonfooter, _ko
-from django.utils.translation import ugettext as _
 %>
 
 <%namespace name="actionbar" file="actionbar.mako" />
@@ -78,51 +80,58 @@ ${ assist.assistPanel() }
 </script>
 
 <script type="text/html" id="metastore-columns-table">
-  <table class="table table-striped table-condensed table-nowrap">
-    <thead>
-    <tr>
-      <th width="2%">&nbsp;</th>
-      ## no stats for partition key type
-      <th width="2%" class="no-sort">&nbsp;</th>
-##       <th width="1%">&nbsp;</th>
-      <th width="17%">${_('Name')}</th>
-      <th width="29%">${_('Type')}</th>
-      <th width="50%">${_('Comment')}</th>
-    </tr>
-    </thead>
-    <tbody data-bind="hueach: {data: $data, itemHeight: 29, scrollable: '.right-panel', scrollableOffset: 200}">
+  <div style="overflow-x: auto; overflow-y: hidden">
+    <table class="table table-striped table-condensed table-nowrap">
+      <thead>
       <tr>
-        ## start at 1
-        <td data-bind="text: $index()+$indexOffset()+1"></td>
+        <th width="2%">&nbsp;</th>
         ## no stats for partition key type
-        <td>
-         <span class="blue" data-bind="component: { name: 'table-stats', params: {
-            alwaysActive: true,
-            statsVisible: true,
-            sourceType: 'hive',
-            databaseName: table.database.name,
-            tableName: table.name,
-            columnName: name,
-            fieldType: type,
-            assistHelper: table.assistHelper
-          } }"></span>
-        </td>
-##         <td class="pointer" data-bind="click: function() { favourite(!favourite()) }"><i style="color: #338bb8" class="fa" data-bind="css: {'fa-star': favourite, 'fa-star-o': !favourite() }"></i></td>
-        <td title="${ _("Scroll to the column") }">
-          <a href="javascript:void(0)" class="column-selector" data-bind="text: name"></a>
-        </td>
-        <td data-bind="text: type"></td>
-        <td>
-          <span data-bind="editable: comment, editableOptions: {enabled: true, placement: 'left', emptytext: '${ _ko('Add a comment...') }' }" class="editable editable-click editable-empty">
-            ${ _('Add a comment...') }</span>
-        </td>
+        <th width="2%" class="no-sort">&nbsp;</th>
+  ##       <th width="1%">&nbsp;</th>
+        <th width="17%">${_('Name')}</th>
+        <th width="29%">${_('Type')}</th>
+        <th width="50%">${_('Comment')}</th>
       </tr>
-    </tbody>
-  </table>
+      </thead>
+      <tbody data-bind="hueach: {data: $data, itemHeight: 29, scrollable: '.right-panel', scrollableOffset: 200, disableHueEachRowCount: 5}">
+        <tr>
+          ## start at 1
+          <td data-bind="text: $index()+$indexOffset()+1"></td>
+          ## no stats for partition key type
+          <td>
+           <span class="blue" data-bind="component: { name: 'table-stats', params: {
+              alwaysActive: true,
+              statsVisible: true,
+              sourceType: 'hive',
+              databaseName: table.database.name,
+              tableName: table.name,
+              columnName: name,
+              fieldType: type,
+              assistHelper: table.assistHelper
+            } }"></span>
+          </td>
+  ##         <td class="pointer" data-bind="click: function() { favourite(!favourite()) }"><i style="color: #338bb8" class="fa" data-bind="css: {'fa-star': favourite, 'fa-star-o': !favourite() }"></i></td>
+          <td title="${ _("Scroll to the column") }">
+            <!-- ko if: $root.database().table().samples.loading() -->
+            <span data-bind="text: name"></span>
+            <!-- /ko -->
+            <!-- ko ifnot: $root.database().table().samples.loading() -->
+            <a href="javascript:void(0)" class="column-selector" data-bind="text: name, click: scrollToColumn"></a>
+            <!-- /ko -->
+          </td>
+          <td data-bind="text: type"></td>
+          <td>
+            <span data-bind="editable: comment, editableOptions: {enabled: true, placement: 'left', emptytext: '${ _ko('Add a comment...') }' }" class="editable editable-click editable-empty">
+              ${ _('Add a comment...') }</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </script>
 
 <script type="text/html" id="metastore-partition-columns-table">
-  <div style="overflow: auto">
+  <div style="overflow-x: auto; overflow-y: hidden">
     <table class="table table-striped table-condensed table-nowrap">
       <thead>
         <tr>
@@ -145,7 +154,7 @@ ${ assist.assistPanel() }
 </script>
 
 <script type="text/html" id="metastore-partition-values-table">
-  <div style="overflow: auto">
+  <div style="overflow-x: auto; overflow-y: hidden">
     <table class="table table-striped table-condensed table-nowrap">
       <thead>
         <tr>
@@ -173,7 +182,7 @@ ${ assist.assistPanel() }
 </script>
 
 <script type="text/html" id="metastore-samples-table">
-  <div style="overflow: auto">
+  <div style="overflow-x: auto; overflow-y: hidden">
     <table class="table table-striped table-condensed table-nowrap">
       <thead>
         <tr>
@@ -206,6 +215,7 @@ ${ assist.assistPanel() }
 </script>
 
 <script type="text/html" id="metastore-table-properties">
+  <i data-bind="visible: loadingDetails" class="fa fa-spinner fa-spin fa-2x muted" style="display: none;"></i>
   <!-- ko with: tableDetails -->
   <h4>${ _('Properties') }</h4>
   <div class="row-fluid">
@@ -235,13 +245,15 @@ ${ assist.assistPanel() }
     <!-- ko with: tableDetails -->
     <h4>${ _('Stats') }
       <!-- ko ifnot: partition_keys.length -->
+        % if has_write_access:
         <!-- ko if: $parent.refreshingTableStats -->
         <i class="fa fa-refresh fa-spin"></i>
         <!-- /ko -->
         <!-- ko ifnot: $parent.refreshingTableStats() || is_view  -->
         <a class="pointer" href="javascript: void(0);" data-bind="click: $parent.refreshTableStats"><i class="fa fa-refresh"></i></a>
         <!-- /ko -->
-        <span data-bind="visible: ! details.stats.COLUMN_STATS_ACCURATE && ! is_view" rel="tooltip" data-placement="top" title="${ _('The column stats for this table are not accurate') }"><i class="fa fa-exclamation-triangle"></i></span>
+        % endif
+        <span data-bind="visible: details.stats.COLUMN_STATS_ACCURATE == 'false' && ! is_view" rel="tooltip" data-placement="top" title="${ _('The column stats for this table are not accurate') }"><i class="fa fa-exclamation-triangle"></i></span>
       <!-- /ko -->
     </h4>
     <div class="row-fluid">
@@ -460,8 +472,14 @@ ${ assist.assistPanel() }
     <!-- ko with: database -->
     <!-- ko with: table -->
 ##     <a class="inactive-action margin-left-10" href="javascript: void(0);"><i class="fa fa-star"></i></a>
-    <a class="inactive-action margin-left-10" href="#" data-bind="click: showImportData" title="${_('Import Data')}"><i class="fa fa-upload"></i></a>
+    % if has_write_access:
+    <a class="inactive-action margin-left-10" href="#" data-bind="click: showImportData, visible: tableDetails() && ! tableDetails().is_view" title="${_('Import Data')}"><i class="fa fa-upload"></i></a>
+    % endif
+    % if USE_NEW_EDITOR.get():
+    <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/metastore/table/'+ database.name + '/' + name + '/read' }" title="${_('Browse Data')}"><i class="fa fa-list"></i></a>
+    % else:
     <a class="inactive-action margin-left-10" data-bind="attr: { 'href': '/notebook/browse/' + database.name + '/' + name }" title="${_('Browse Data')}"><i class="fa fa-list"></i></a>
+    % endif
     % if has_write_access:
       <a class="inactive-action margin-left-10" href="#dropSingleTable" data-toggle="modal" data-bind="attr: { 'title' : tableDetails() && tableDetails().is_view ? '${_('Drop View')}' : '${_('Drop Table')}' }"><i class="fa fa-times"></i></a>
     % endif
@@ -491,7 +509,7 @@ ${ assist.assistPanel() }
   </div>
 
   <div class="tile">
-    <h4>${ _('Columns') } (<span data-bind="text: columns().length"></span>)</h4>
+    <h4>${ _('Columns') } (<span data-bind="text: columns().length"></span>) <i data-bind="visible: loadingColumns" class="fa fa-spinner fa-spin" style="display: none;"></i></h4>
     <!-- ko with: favouriteColumns -->
     <!-- ko template: "metastore-columns-table" --><!-- /ko -->
     <!-- /ko -->
@@ -636,7 +654,7 @@ ${ assist.assistPanel() }
     <li><a href="#details" data-toggle="tab" data-bind="click: function(){ $root.currentTab('table-details'); }">${ _('Details') }</a></li>
   </ul>
 
-  <div class="tab-content margin-top-10" style="border: none">
+  <div class="tab-content margin-top-10" style="border: none; overflow: hidden">
     <div class="tab-pane" id="overview">
       <!-- ko if: $root.currentTab() == 'table-overview' -->
       <!-- ko template: 'metastore-overview-tab' --><!-- /ko -->
@@ -715,7 +733,7 @@ ${ assist.assistPanel() }
           }"></div>
       </div>
       <div class="resizer" data-bind="visible: $root.isLeftPanelVisible() && $root.assistAvailable(), splitDraggable : { appName: 'notebook', leftPanelVisible: $root.isLeftPanelVisible }"><div class="resize-bar">&nbsp;</div></div>
-      <div class="right-panel">
+      <div class="right-panel" data-bind="perfectScrollbar">
         <div class="metastore-main">
           <h3>
             <!-- ko template: { if: database() !== null && database().table() !== null, name: 'metastore-describe-table-actions' }--><!-- /ko -->
@@ -789,6 +807,11 @@ ${ assist.assistPanel() }
 
       var viewModel = new MetastoreViewModel(options);
 
+      huePubSub.subscribe('metastore.scroll.to.top', function () {
+        $(".right-panel").scrollTop(0);
+        $('.right-panel').perfectScrollbar('update');
+      });
+
       ko.applyBindings(viewModel);
 
       if (location.getParameter('refresh') === 'true') {
@@ -805,7 +828,27 @@ ${ assist.assistPanel() }
             viewModel.loadingQueries(false);
           });
         }
+        $('.right-panel').perfectScrollbar('update');
       });
+
+      window.scrollToColumn = function (col) {
+        if (!col.table.samples.loading()) {
+          $('a[href="#sample"]').click();
+          window.setTimeout(function () {
+            var sampleTable = $('#sample').find('table');
+            var sampleCol = sampleTable.find('th').filter(function () {
+              return $.trim($(this).text()).indexOf(col.name()) > -1;
+            });
+            sampleTable.find('.columnSelected').removeClass('columnSelected');
+            sampleTable.find('tr td:nth-child(' + (sampleCol.index() + 1) + ')').addClass('columnSelected');
+            var scrollLeft = 0;
+            sampleTable.find('th:lt(' + sampleCol.index() + ')').each(function () {
+              scrollLeft += $(this).outerWidth();
+            });
+            sampleTable.parent().scrollLeft(scrollLeft);
+          }, 200);
+        }
+      }
 
     });
   });

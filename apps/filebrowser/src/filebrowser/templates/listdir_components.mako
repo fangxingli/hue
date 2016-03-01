@@ -35,7 +35,12 @@ from django.utils.translation import ugettext as _
 <%def name="_table(files, path, current_request_path, view, show_download_button)">
 
   <link href="${ static('filebrowser/css/listdir_components.css') }" rel="stylesheet" type="text/css">
-  <table class="table table-condensed datatables tablescroller-disable">
+
+  <div data-bind="visible: isLoading">
+    <i class="fa fa-spinner fa-spin hue-spinner-large hue-spinner-center muted"></i>
+  </div>
+
+  <table class="table table-condensed datatables tablescroller-disable" data-bind="style: {'opacity': isLoading() ? '.5': '1'}">
     <thead>
       <tr>
         <th width="1%"><div data-bind="click: selectAll, css: {hueCheckbox: true, 'fa': true, 'fa-check': allSelected}" class="select-all"></div></th>
@@ -50,11 +55,6 @@ from django.utils.translation import ugettext as _
     </thead>
     <tbody id="files" data-bind="template: {name: 'fileTemplate', foreach: files}"></tbody>
     <tfoot>
-      <tr data-bind="visible: isLoading()">
-        <td colspan="8" class="left">
-          <img src="${ static('desktop/art/spinner.gif') }" />
-        </td>
-      </tr>
       <tr data-bind="visible: files().length === 0 && !isLoading()">
         <td colspan="8">
           <div class="alert">
@@ -136,7 +136,7 @@ from django.utils.translation import ugettext as _
   <div id="purgeTrashModal" class="modal hide fade">
     <div class="modal-header">
       <a href="#" class="close" data-dismiss="modal">&times;</a>
-      <h3>${_('Confirm Empty Trash')}</h3>
+      <h3>${_('Confirm empty trash')}</h3>
     </div>
 
     <div class="modal-body">
@@ -147,7 +147,7 @@ from django.utils.translation import ugettext as _
       <form id="purgeTrashForm" action="/filebrowser/trash/purge" method="POST" enctype="multipart/form-data" class="form-stacked">
         ${ csrf_token(request) | n,unicode }
         <a class="btn" data-dismiss="modal">${_('Cancel')}</a>
-        <input type="submit" value="${_('Delete')}" class="btn btn-primary" />
+        <input type="submit" value="${_('Delete all')}" class="btn btn-danger" />
       </form>
     </div>
   </div>
@@ -340,7 +340,7 @@ from django.utils.translation import ugettext as _
   <!-- upload archive modal -->
   <div id="uploadArchiveModal" class="modal hide fade">
     <div class="modal-header">
-      <a href="#" class="close" data-dismiss="modal">&times;</a>
+      <a href="#" class="close" data-dismiss="modal" data-bind="visible: pendingUploads() == 0">&times;</a>
       <h3>${_('Upload and extract in')} <span id="uploadDirName" data-bind="text: currentPath"></span></h3>
     </div>
     <div class="modal-body form-inline">
@@ -651,7 +651,7 @@ from django.utils.translation import ugettext as _
       if (path != '/filebrowser/') {
         var _basePath = '${url('filebrowser.views.view', path='')}';
         if (path.indexOf(_basePath) > -1) {
-          path = path.substr(_basePath.length - 1);
+          path = path.substr(_basePath.length);
         }
 
         // ensure no duplicates are pushed to $.totalStorage()
@@ -1344,6 +1344,7 @@ from django.utils.translation import ugettext as _
       };
 
       self.uploadFile = (function () {
+        self.pendingUploads(0);
         var action = "/filebrowser/upload/file";
         var uploader = new qq.FileUploader({
           element: document.getElementById("fileUploader"),
@@ -1351,32 +1352,49 @@ from django.utils.translation import ugettext as _
           template: '<div class="qq-uploader" style="margin-left: 10px">' +
           '<div class="qq-upload-drop-area"><span>${_('Drop the files here to upload')}</span></div>' +
           '<div class="qq-upload-button">${_('Select files')}</div> &nbsp; <span class="muted">or drag and drop them here</span>' +
-          '<ul class="qq-upload-list"></ul>' +
+          '<ul class="qq-upload-list qq-upload-files unstyled" style="margin-right: 0;"></ul>' +
           '</div>',
-          fileTemplate: '<li>' +
-          '<span class="qq-upload-file"></span>' +
-          '<span class="qq-upload-spinner"></span>' +
-          '<span class="qq-upload-size"></span>' +
-          '<a class="qq-upload-cancel" href="#">${_('Cancel')}</a>' +
+          fileTemplate: '<li><span class="qq-upload-file-extended" style="display:none"></span><span class="qq-upload-spinner hide" style="display:none"></span>' +
+          '<div class="progress-row dz-processing">' +
+          '<span class="break-word qq-upload-file"></span>' +
+          '<div class="pull-right">' +
+          '<span class="muted qq-upload-size"></span>&nbsp;&nbsp;' +
+          '<a href="#" title="${_('Cancel')}" class="complex-layout"><i class="fa fa-fw fa-times qq-upload-cancel"></i></a>' +
+          '<span class="qq-upload-done" style="display:none"><i class="fa fa-fw fa-check muted"></i></span>' +
           '<span class="qq-upload-failed-text">${_('Failed')}</span>' +
-          '</li>',
+          '</div>' +
+          '<div class="progress-row-bar" style="width: 0%;"></div>' +
+          '</div></li>',
           params: {
             dest: self.currentPath(),
             fileFieldLabel: "hdfs_file"
           },
+          onProgress: function (id, fileName, loaded, total) {
+            $('.qq-upload-files').find('li').each(function(){
+              var listItem = $(this);
+              if (listItem.find('.qq-upload-file-extended').text() == fileName){
+                listItem.find('.progress-row-bar').css('width', (loaded/total)*100 + '%');
+              }
+            });
+          },
           onComplete: function (id, fileName, response) {
             self.pendingUploads(self.pendingUploads() - 1);
             if (response.status != 0) {
-              $(document).trigger("error", "${ _('Error: ') }" + response['data']);
-            } else if (self.pendingUploads() == 0) {
-              location = "/filebrowser/view=" + self.currentPath();
+              $(document).trigger('error', "${ _('Error: ') }" + response.data);
+            }
+            else {
+              $(document).trigger('info', response.path + "${ _(' uploaded successfully.') }");
+            }
+            if (self.pendingUploads() == 0) {
+              $('#uploadFileModal').modal('hide');
+              self.retrieveData();
             }
           },
           onSubmit: function (id, fileName, responseJSON) {
             self.pendingUploads(self.pendingUploads() + 1);
           },
           onCancel: function (id, fileName) {
-            self.pendingUploads(0);
+            self.pendingUploads(self.pendingUploads() - 1);
           },
           debug: false
         });
@@ -1398,36 +1416,56 @@ from django.utils.translation import ugettext as _
       })();
 
       self.uploadArchive = (function () {
+        self.pendingUploads(0);
         var uploader = new qq.FileUploader({
           element: document.getElementById("archiveUploader"),
           action: "/filebrowser/upload/archive",
           template: '<div class="qq-uploader" style="margin-left: 10px">' +
           '<div class="qq-upload-drop-area"><span>${_('Drop the archives here to upload and extract them')}</span></div>' +
           '<div class="qq-upload-button">${_('Select ZIP, TGZ or BZ2 files')}</div> &nbsp; <span class="muted">or drag and drop them here</span>' +
-          '<ul class="qq-upload-list"></ul>' +
+          '<ul class="qq-upload-list qq-upload-archives unstyled" style="margin-right: 0;"></ul>' +
           '</div>',
-          fileTemplate: '<li>' +
-          '<span class="qq-upload-file"></span>' +
-          '<span class="qq-upload-spinner"></span>' +
-          '<span class="qq-upload-size"></span>' +
-          '<a class="qq-upload-cancel" href="#">${_('Cancel')}</a>' +
+          fileTemplate: '<li><span class="qq-upload-file-extended" style="display:none"></span><span class="qq-upload-spinner hide" style="display:none"></span>' +
+          '<div class="progress-row dz-processing">' +
+          '<span class="break-word qq-upload-file"></span>' +
+          '<div class="pull-right">' +
+          '<span class="muted qq-upload-size"></span>&nbsp;&nbsp;' +
+          '<a href="#" title="${_('Cancel')}" class="complex-layout"><i class="fa fa-fw fa-times qq-upload-cancel"></i></a>' +
+          '<span class="qq-upload-done" style="display:none"><i class="fa fa-fw fa-check muted"></i></span>' +
           '<span class="qq-upload-failed-text">${_('Failed')}</span>' +
-          '</li>',
+          '</div>' +
+          '<div class="progress-row-bar" style="width: 0%;"></div>' +
+          '</div></li>',
           params: {
             dest: self.currentPath(),
             fileFieldLabel: "archive"
           },
-          onComplete: function (id, fileName, responseJSON) {
+          onProgress: function (id, fileName, loaded, total) {
+            $('.qq-upload-archives').find('li').each(function(){
+              var listItem = $(this);
+              if (listItem.find('.qq-upload-file-extended').text() == fileName){
+                listItem.find('.progress-row-bar').css('width', (loaded/total)*100 + '%');
+              }
+            });
+          },
+          onComplete: function (id, fileName, response) {
             self.pendingUploads(self.pendingUploads() - 1);
+            if (response.status != 0) {
+              $(document).trigger('error', "${ _('Error: ') }" + response.data);
+            }
+            else {
+              $(document).trigger('info', response.path + "${ _(' uploaded successfully.') }");
+            }
             if (self.pendingUploads() == 0) {
-              location = "/filebrowser/view=" + self.currentPath();
+              $('#uploadArchiveModal').modal('hide');
+              self.retrieveData();
             }
           },
           onSubmit: function (id, fileName, responseJSON) {
             self.pendingUploads(self.pendingUploads() + 1);
           },
           onCancel: function (id, fileName) {
-            self.pendingUploads(0);
+            self.pendingUploads(self.pendingUploads() - 1);
           },
           debug: false
         });
@@ -1617,9 +1655,16 @@ from django.utils.translation import ugettext as _
               $.jHueNotify.info("${_('Upload has been canceled')}");
             },
             complete: function (data) {
-              var response = JSON.parse(data.xhr.response);
-              if (response && response.status && response.status == -1){
-                $.jHueNotify.error(response.data);
+              if (data.xhr.response != '') {
+                var response = JSON.parse(data.xhr.response);
+                if (response && response.status != null) {
+                  if (response.status != 0) {
+                    $(document).trigger('error', response.data);
+                  }
+                  else {
+                    $(document).trigger('info', response.path + "${ _(' uploaded successfully.') }");
+                  }
+                }
               }
             }
           };

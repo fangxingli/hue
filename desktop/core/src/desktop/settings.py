@@ -80,6 +80,18 @@ desktop.log.fancy_logging()
 # http://www.i18nguy.com/unicode/language-identifiers.html
 LANGUAGE_CODE = 'zh_CN'
 
+LANGUAGES = [
+  ('de', _('German')),
+  ('en-us', _('English')),
+  ('es', _('Spanish')),
+  ('fr', _('French')),
+  ('ja', _('Japanese')),
+  ('ko', _('Korean')),
+  ('pt', _('Portuguese')),
+  ('pt_BR', _('Brazilian Portuguese')),
+  ('zh_CN', _('Simplified Chinese')),
+]
+
 SITE_ID = 1
 
 # If you set this to False, Django will make some optimizations so as not
@@ -276,6 +288,8 @@ if DEBUG: # For simplification, force all DEBUG when django_debug_mode is True a
 
 # Configure allowed hosts
 ALLOWED_HOSTS = desktop.conf.ALLOWED_HOSTS.get()
+
+X_FRAME_OPTIONS = desktop.conf.X_FRAME_OPTIONS.get()
 
 # Configure hue admins
 ADMINS = []

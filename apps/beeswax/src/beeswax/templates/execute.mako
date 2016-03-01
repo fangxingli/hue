@@ -340,11 +340,12 @@ ${ layout.menubar(section='query') }
           class="view-query-results hide pull-right"><h4><i class="fa fa-save"></i></h4>
         </a>
 
-        <a id="download-csv" data-bind="attr: {'href': '/${ app_name }/download/' + $root.design.history.id() + '/csv'}" href="javascript:void(0)" title="${_('Download the results in CSV format')}" rel="tooltip"
+        ## Tricks for not triggering the closing of the query on download
+        <a id="download-csv" data-bind="attr: {'href': '/${ app_name }/download/' + $root.design.history.id() + '/csv'}, event: { mouseover: function(){ window.onbeforeunload = null; }, mouseout: function() { window.onbeforeunload = $(window).data('beforeunload'); } }"" href="javascript:void(0)" title="${_('Download the results in CSV format')}" rel="tooltip"
           class="view-query-results download hide pull-right"><h4><i class="hfo hfo-file-csv"></i></h4>
         </a>
 
-        <a id="download-excel" data-bind="attr: {'href': '/${ app_name }/download/' + $root.design.history.id() + '/xls'}" href="javascript:void(0)" title="${_('Download the results in XLS format')}" rel="tooltip"
+        <a id="download-excel" data-bind="attr: {'href': '/${ app_name }/download/' + $root.design.history.id() + '/xls'}, event: { mouseover: function(){ window.onbeforeunload = null; }, mouseout: function() { window.onbeforeunload = $(window).data('beforeunload'); } }" href="javascript:void(0)" title="${_('Download the results in XLS format')}" rel="tooltip"
           class="view-query-results download hide pull-right"><h4><i class="hfo hfo-file-xls"></i></h4></a>
         <!-- /ko -->
         <a href="#clearHistoryModal" title="${_('Clear the query history')}" rel="tooltip" class="clear-queries pull-right" data-toggle="modal"><h4><i class="fa fa-calendar-times-o"></i></h4></a>
@@ -736,48 +737,6 @@ ${ layout.menubar(section='query') }
 </div>
 
 
-<div id="tableAnalysis" class="popover mega-popover right">
-  <div class="arrow"></div>
-  <h3 class="popover-title" style="text-align: left">
-    <a class="pull-right pointer close-popover" style="margin-left: 8px"><i class="fa fa-times"></i></a>
-    <a class="pull-right pointer stats-refresh" style="margin-left: 8px"><i class="fa fa-refresh"></i></a>
-    <span class="pull-right stats-warning muted" rel="tooltip" data-placement="top" title="${ _('The column stats for this table are not accurate') }" style="margin-left: 8px"><i class="fa fa-exclamation-triangle"></i></span>
-    <strong class="table-name"></strong> ${ _(' table analysis') }
-  </h3>
-  <div class="popover-content">
-    <div id="tableAnalysisStats">
-      <div class="content"></div>
-    </div>
-  </div>
-</div>
-
-<div id="columnAnalysis" class="popover mega-popover right">
-  <div class="arrow"></div>
-  <h3 class="popover-title" style="text-align: left">
-    <a class="pull-right pointer close-popover" style="margin-left: 8px"><i class="fa fa-times"></i></a>
-    <a class="pull-right pointer stats-refresh" style="margin-left: 8px"><i class="fa fa-refresh"></i></a>
-    <strong class="column-name"></strong> ${ _(' column analysis') }
-  </h3>
-  <div class="popover-content">
-    <div class="pull-right hide filter">
-      <input id="columnAnalysisTermsFilter" type="text" placeholder="${ _('Prefix filter...') }"/>
-    </div>
-    <ul class="nav nav-tabs" role="tablist">
-      <li class="active"><a href="#columnAnalysisStats" role="tab" data-toggle="tab">${ _('Stats') }</a></li>
-      <li><a href="#columnAnalysisTerms" role="tab" data-toggle="tab">${ _('Terms') }</a></li>
-    </ul>
-    <div class="tab-content">
-      <div class="tab-pane active" id="columnAnalysisStats" style="text-align: left">
-        <div class="content"></div>
-      </div>
-      <div class="tab-pane" id="columnAnalysisTerms" style="text-align: left">
-        <div class="alert">${ _('There are no terms to be shown') }</div>
-        <div class="content"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div id="clearHistoryModal" class="modal hide fade">
   <div class="modal-header">
     <a href="#" class="close" data-dismiss="modal">&times;</a>
@@ -836,7 +795,7 @@ ${ commonshare() | n,unicode }
 <script src="${ static('desktop/ext/select2/select2.min.js') }" type="text/javascript" charset="utf-8"></script>
 
 
-${ assist.assistPanel('.table-container') }
+${ assist.assistPanel() }
 ${ tableStats.tableStats() }
 
 <style type="text/css">
@@ -1116,7 +1075,7 @@ var leftPanelWidth = $.totalStorage("${app_name}_left_panel_width") != null ? $.
 $(".left-panel").css("width", leftPanelWidth + "px");
 $(".right-panel").css("left", leftPanelWidth + 20 + "px");
 
-var codeMirror, resizeNavigator, dataTable, renderRecent, syncWithHive;
+var codeMirror, dataTable, renderRecent, syncWithHive;
 
 var HIVE_AUTOCOMPLETE_BASE_URL = "${ autocomplete_base_url | n,unicode }";
 var HIVE_AUTOCOMPLETE_FAILS_QUIETLY_ON = [500]; // error codes from beeswax/views.py - autocomplete
@@ -1206,14 +1165,19 @@ function reinitializeTableExtenders() {
      includeNavigator: false
   });
 }
-
 var CURRENT_CODEMIRROR_SIZE = 100;
+var INITIAL_CODEMIRROR_SIZE = CURRENT_CODEMIRROR_SIZE;
+var CODEMIRROR_MANUALLY_RESIZED = false;
 var INITIAL_HORIZONTAL_RESIZE_POSITION = -1;
 
 // Navigator, recent queries
 $(document).ready(function () {
   $("#resizePanel a").draggable({
     axis: "y",
+    start: function (e, ui) {
+      CODEMIRROR_MANUALLY_RESIZED = true;
+      draggableHelper($(this), e, ui);
+    },
     drag: function (e, ui) {
       draggableHelper($(this), e, ui);
       $(".jHueTableExtenderClonedContainer").hide();
@@ -1221,10 +1185,10 @@ $(document).ready(function () {
       $(".jHueTableExtenderClonedContainerCell").hide();
     },
     stop: function (e, ui) {
+      draggableHelper($(this), e, ui);
       $(".jHueTableExtenderClonedContainer").show();
       $(".jHueTableExtenderClonedContainerColumn").show();
       $(".jHueTableExtenderClonedContainerCell").show();
-      draggableHelper($(this), e, ui);
       reinitializeTableExtenders();
     }
   });
@@ -1239,17 +1203,18 @@ $(document).ready(function () {
   checkForInitialSplitterPosition();
 
   function resizeCodeMirror(el) {
-    CURRENT_CODEMIRROR_SIZE = 100 + (el.position().top - INITIAL_HORIZONTAL_RESIZE_POSITION);
+    CURRENT_CODEMIRROR_SIZE = INITIAL_CODEMIRROR_SIZE + (el.position().top - INITIAL_HORIZONTAL_RESIZE_POSITION);
+    if (CURRENT_CODEMIRROR_SIZE < 100) {
+      CURRENT_CODEMIRROR_SIZE = 100;
+    }
     codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
   }
 
   function draggableHelper(el, e, ui) {
-    if (el.position().top > INITIAL_HORIZONTAL_RESIZE_POSITION) {
-      resizeCodeMirror(el);
-    }
-    if (ui.position.top < INITIAL_HORIZONTAL_RESIZE_POSITION) {
-      ui.position.top = INITIAL_HORIZONTAL_RESIZE_POSITION;
-      resizeCodeMirror(el);
+    resizeCodeMirror(el);
+    var minHandlePosition = $('.card-heading.simple').is(':visible') ? 248 : 205;
+    if (ui.position.top < minHandlePosition) {
+      ui.position.top = minHandlePosition;
     }
   }
 
@@ -1334,11 +1299,20 @@ $(document).ready(function () {
     });
   });
 
-  resizeNavigator = function () {
-    $(".resizer").css("height", $(window).height() + "px");
-    $("#navigator .card").css("height", $(window).height() + "px");
-    $(".table-container").css("max-height", ($(window).height() - 180) + "px").css("overflow-y", "auto");
+  var lastWindowHeight = -1
+  var resizeNavigator = function () {
+    var newHeight = $(window).height();
+    if (lastWindowHeight !== newHeight) {
+      $(".resizer").css("height", (newHeight - 90) + "px");
+      $("#navigator .card").css("height", (newHeight - 130) + "px").css("overflow-y", "hidden");
+      lastWindowHeight = newHeight;
+    }
   };
+
+  resizeNavigator();
+  $(window).on("scroll", resizeNavigator);
+  $(window).on("resize", resizeNavigator);
+  window.setInterval(resizeNavigator, 500);
 
   $(document).on("click", "#expandResults", function(){
     $("#resultTablejHueTableExtenderClonedContainer").remove();
@@ -1357,9 +1331,6 @@ $(document).ready(function () {
     window.setTimeout(reinitializeTable, 200);
   });
 
-  resizeNavigator();
-  window.setTimeout(resizeNavigator, 200);
-
   $(document).on("click", ".column-selector", function () {
     var _t = $("#resultTable");
     var _text = $.trim($(this).text().split("(")[0]);
@@ -1369,14 +1340,6 @@ $(document).ready(function () {
     _t.find(".columnSelected").removeClass("columnSelected");
     _t.find("tr td:nth-child(" + (_col.index() + 1) + ")").addClass("columnSelected");
     $("a[href='#results']").click();
-  });
-
-  $(document).on("click", "#tableAnalysis .close-popover", function () {
-    $("#tableAnalysis").hide();
-  });
-
-  $(document).on("click", "#columnAnalysis .close-popover", function () {
-    $("#columnAnalysis").hide();
   });
 
   $(document).on("clear.history", function() {
@@ -1409,12 +1372,6 @@ $(document).ready(function () {
       }
     } else {
       reinitializeTable();
-    }
-    if ($(e.target).attr("href") == "#columnAnalysisTerms") {
-      $("#columnAnalysis .filter").removeClass("hide");
-    }
-    if ($(e.target).attr("href") == "#columnAnalysisStats") {
-      $("#columnAnalysis .filter").addClass("hide");
     }
     return e;
   });
@@ -1479,10 +1436,6 @@ $(document).ready(function () {
   });
 
   initQueryField();
-
-  $(window).on("resize", resizeNavigator);
-
-  window.setInterval(resizeNavigator, 1000);
 
   function initQueryField() {
     if ($("#queryField").val() == "") {
@@ -1627,6 +1580,7 @@ $(document).ready(function () {
     value: queryEditor.value,
     readOnly: false,
     lineNumbers: true,
+    viewportMargin: Infinity,
     % if app_name == 'impala':
     mode: "text/x-impalaql",
     % else:
@@ -1713,12 +1667,18 @@ $(document).ready(function () {
     $(document.body).off("contextmenu");
   });
 
-  codeMirror.on("update", function () {
-    if (CURRENT_CODEMIRROR_SIZE == 100 && codeMirror.lineCount() > 7){
-      CURRENT_CODEMIRROR_SIZE = 270;
-      codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
-      reinitializeTableExtenders();
-    }
+  codeMirror.on("change", function () {
+    window.setTimeout(function () {
+      if (!CODEMIRROR_MANUALLY_RESIZED && $('.CodeMirror').height() < 270 && codeMirror.lineCount() > 7) {
+        CURRENT_CODEMIRROR_SIZE = 270;
+        if ($('.card-heading.simple').is(':visible')) {
+          INITIAL_CODEMIRROR_SIZE = 270;
+          INITIAL_HORIZONTAL_RESIZE_POSITION = 418;
+        }
+        codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
+        reinitializeTableExtenders();
+      }
+    }, 200);
   });
 
   $("#download-excel").click(function () {
@@ -2008,7 +1968,7 @@ function resizeLogs() {
     $("#log pre:eq(1)").css("overflow", "auto").height(_height - 50);
   }
   if ($("#query pre:eq(1)").length > 0) {
-    var _height = Math.max($(window).height() - $("#log pre:eq(1)").offset().top, 250);
+    var _height = Math.max($(window).height() - $("#query pre:eq(1)").offset().top, 250);
     $("#query").height(_height - 10);
     $("#query pre:eq(1)").css("overflow", "auto").height(_height - 50);
   }
@@ -2537,23 +2497,15 @@ $(document).ready(function () {
   $(document).on('execute.query', function() {
     viewModel.closeQuery();
   });
-
-  // Tricks for not triggering the closing of the query on download
-  $("a.download").hover(function(){
-      window.onbeforeunload = null;
-    },function() {
-      window.onbeforeunload = $(window).data('beforeunload');
-    }
-  );
 });
 
 // Close the query when leaving the page, backup for later when disabling the close before downloading results.
 window.onbeforeunload = function(e) {
   viewModel.closeQuery();
 };
-$(window).data('beforeunload', window.onbeforeunload);
-
 % endif
+
+$(window).data('beforeunload', window.onbeforeunload);
 
 $(".folderChooser:not(:has(~ button))").after(getFolderBrowseButton($(".folderChooser:not(:has(~ button))"), true));
 $(".pathChooser:not(:has(~ button))").after(getPathBrowseButton($(".pathChooser:not(:has(~ button))"), true));
@@ -2827,7 +2779,7 @@ viewModel.design.fileResources.values.subscribe(function() {
     else if (viewModel.design.results.errors().length == 0) {
       window.setTimeout(function(){
         window.location.href = successUrl + (successUrl.indexOf("?") > -1 ? "&" : "?") + "refresh=true";
-      }, 200);
+      }, 1000);
     }
   });
 % elif action == 'editor-results':

@@ -21,7 +21,7 @@ from django.utils.translation import ugettext as _
 from desktop.views import _ko
 %>
 
-<%def name="assistPanel(scrollable='.assist-stretchable-list')">
+<%def name="assistPanel()">
   <style>
 
     .assist-icon {
@@ -580,10 +580,21 @@ from desktop.views import _ko
   </script>
 
   <script type="text/html" id="ask-for-invalidate-content">
-    <label class="checkbox" style="margin-bottom: 2px;"><input type="checkbox" data-bind="checked: invalidateOnRefresh" /> ${ _('Invalidate metadata') }</label>
-    <div style="display: inline-block; margin-left: 20px; font-style: italic">${ _('This could take a noticeable amount of time') }</div>
-    <label class="checkbox" style="margin-top: 4px;"><input type="checkbox" data-bind="checked: dontAskForInvalidateTemp" /> ${ _('Remember my decision') }</label>
-    <div style="width: 100%; display: inline-block; margin-top: 5px;"><button class="pull-right btn btn-primary" data-bind="click: function () { huePubSub.publish('close.popover'); triggerRefresh(); }, clickBubble: false">${ _('Refresh') }</button></div>
+    <label class="radio" style="margin-bottom: 2px;">
+      <input type="radio" name="refreshImpala" value="cache" data-bind="checked: invalidateOnRefresh" />
+      ${ _('Clear cache') }
+    </label>
+    <label class="radio" style="margin-bottom: 2px;">
+      <input type="radio" name="refreshImpala" value="invalidate" data-bind="checked: invalidateOnRefresh" />
+      ${ _('Perform incremental metadata update') }
+    </label>
+    <div style="display: inline-block; margin-left: 20px; font-style: italic; color: #999;">${ _('This will sync missing tables in Hive.') }</div>
+    <label class="radio" style="margin-bottom: 2px;">
+      <input type="radio" name="refreshImpala" value="invalidateAndFlush" data-bind="checked: invalidateOnRefresh"  />
+      ${ _('Invalidate all metadata and rebuild index') }
+    </label>
+    <div style="display: inline-block; margin-left: 20px; font-style: italic; color: #999;">${ _('WARNING: This can be both resource and time-intensive.') }</div>
+    <div style="width: 100%; display: inline-block; margin-top: 5px;"><button class="pull-right btn btn-primary" data-bind="css: { 'btn-primary': invalidateOnRefresh() !== 'invalidateAndFlush', 'btn-danger': invalidateOnRefresh() === 'invalidateAndFlush' }, click: function () { huePubSub.publish('close.popover'); triggerRefresh(); }, clickBubble: false">${ _('Refresh') }</button></div>
   </script>
 
   <script type="text/html" id="assist-db-header-actions">
@@ -592,12 +603,7 @@ from desktop.views import _ko
       <!-- ko ifnot: loading -->
       <a class="inactive-action" href="javascript:void(0)" data-bind="click: toggleSearch, css: { 'blue' : isSearchVisible }"><i class="pointer fa fa-search" title="${_('Search')}"></i></a>
       <!-- ko if: sourceType === 'impala' -->
-      <!-- ko if: dontAskForInvalidate -->
-      <a class="inactive-action" href="javascript:void(0)" data-bind="click: triggerRefresh"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : loading }" title="${_('Manually refresh the table list')}"></i></a>
-      <!-- /ko -->
-      <!-- ko ifnot: dontAskForInvalidate -->
       <a class="inactive-action" href="javascript:void(0)" data-bind="templatePopover : { contentTemplate: 'ask-for-invalidate-content', titleTemplate: 'ask-for-invalidate-title', trigger: 'click', minWidth: '320px' }"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : loading }" title="${_('Manually refresh the table list')}"></i></a>
-      <!-- /ko -->
       <!-- /ko -->
       <!-- ko if: sourceType !== 'impala' -->
       <a class="inactive-action" href="javascript:void(0)" data-bind="click: triggerRefresh"><i class="pointer fa fa-refresh" data-bind="css: { 'fa-spin blue' : loading }" title="${_('Manually refresh the table list')}"></i></a>
@@ -669,7 +675,7 @@ from desktop.views import _ko
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
         <a class="tableLink pull-right" href="#" target="_blank" style="margin-right: 20px;margin-top:6px">
-          <i class="fa fa-external-link"></i> ${ _('View in Metastore Browser') }
+          <i class="fa fa-external-link"></i> ${ _('View more...') }
         </a>
         <h3>${_('Data sample for')} <span class="tableName"></span></h3>
       </div>
@@ -731,7 +737,7 @@ from desktop.views import _ko
   </script>
 
   <script type="text/html" id="assist-panel-template">
-    <div style="position:relative; height: 100%;" data-bind="assistVerticalResizer: { panels: visiblePanels, assistHelper: assistHelper }">
+    <div style="position:relative; height: 100%; overflow: hidden" data-bind="assistVerticalResizer: { panels: visiblePanels, assistHelper: assistHelper }">
       <!-- ko template: { if: availablePanels.length > 1, name: 'assist-panel-switches' }--><!-- /ko -->
       <div data-bind="visible: visiblePanels().length === 0" style="margin:10px; font-style: italic; display:none;">${_('Select your assist contents above.')}</div>
       <!-- ko foreach: visiblePanels -->
@@ -1064,7 +1070,7 @@ from desktop.views import _ko
             visible: params.visibleAssistPanels && params.visibleAssistPanels.indexOf('hdfs') !== -1
           }));
           <%
-            from beeswax.conf import USE_NEW_EDITOR
+            from desktop.conf import USE_NEW_EDITOR
           %>
           % if USE_NEW_EDITOR.get():
           self.availablePanels.push(new AssistInnerPanel({

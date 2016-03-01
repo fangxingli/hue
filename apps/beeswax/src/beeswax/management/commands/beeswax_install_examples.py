@@ -25,6 +25,7 @@ from django.contrib.auth.models import User
 from django.utils.translation import ugettext as _
 
 from desktop.lib.exceptions_renderable import PopupException
+from desktop.conf import USE_NEW_EDITOR
 from desktop.models import Directory, Document, Document2, Document2Permission, import_saved_beeswax_query
 from hadoop import cluster
 from useradmin.models import get_default_user_group, install_sample_user
@@ -305,36 +306,37 @@ class SampleQuery(object):
       query.save()
       LOG.info('Successfully installed sample design: %s' % (self.name,))
 
-    try:
-      # Don't overwrite
-      doc2 = Document2.objects.get(owner=django_user, name=self.name, type=self._document_type(self.type))
-    except Document2.DoesNotExist:
-      # Create document from saved query
-      notebook = import_saved_beeswax_query(query)
-      data = notebook.get_json()
+    if USE_NEW_EDITOR.get():
+      try:
+        # Don't overwrite
+        doc2 = Document2.objects.get(owner=django_user, name=self.name, type=self._document_type(self.type))
+      except Document2.DoesNotExist:
+        # Create document from saved query
+        notebook = import_saved_beeswax_query(query)
+        data = notebook.get_json()
 
-      # Get or create sample user directories
-      home_dir = Directory.objects.get_home_directory(django_user)
-      examples_dir, created = Directory.objects.get_or_create(
-        parent_directory=home_dir,
-        owner=django_user,
-        name=Document2.EXAMPLES_DIR
-      )
+        # Get or create sample user directories
+        home_dir = Directory.objects.get_home_directory(django_user)
+        examples_dir, created = Directory.objects.get_or_create(
+          parent_directory=home_dir,
+          owner=django_user,
+          name=Document2.EXAMPLES_DIR
+        )
 
-      doc2 = Document2.objects.create(
-        owner=django_user,
-        parent_directory=examples_dir,
-        name=self.name,
-        type=self._document_type(self.type),
-        description=self.desc,
-        data=data
-      )
+        doc2 = Document2.objects.create(
+          owner=django_user,
+          parent_directory=examples_dir,
+          name=self.name,
+          type=self._document_type(self.type),
+          description=self.desc,
+          data=data
+        )
 
-      # Share with default group
-      examples_dir.share(django_user, Document2Permission.READ_PERM, groups=[get_default_user_group()])
-      doc2.save()
+        # Share with default group
+        examples_dir.share(django_user, Document2Permission.READ_PERM, groups=[get_default_user_group()])
+        doc2.save()
 
-      LOG.info('Successfully installed sample query: %s' % (self.name,))
+        LOG.info('Successfully installed sample query: %s' % (self.name,))
 
 
   def _document_type(self, type):

@@ -1318,11 +1318,11 @@
         $panelsAfter.each(function (idx, panel) {
           requiredSpaceAfter += $(panel).data('minHeight');
         });
-        var limitAfter = totalHeight - requiredSpaceAfter;
 
         $resizer.draggable({
           axis: "y",
           drag: function (event, ui) {
+            var limitAfter = totalHeight - requiredSpaceAfter;
             var position = ui.offset.top - containerTop;
             if (position > limitBefore && position < limitAfter) {
               fitPanelHeights($panelsBefore, position - extrasBeforeHeight);
@@ -2950,49 +2950,48 @@
 
   ko.bindingHandlers.hueChecked = {
     after: ['value', 'attr'],
-    init: function (element, valueAccessor, allBindings) {
-      element.type = 'checkbox';
-      element.checked = false;
+    init: function (element, valueAccessor, allBindings, viewModel, bindingContext) {
+      var selectedValues = valueAccessor();
+
+      var updateCheckedState = function () {
+        ko.utils.toggleDomNodeCssClass(element, 'fa-check', selectedValues.indexOf(viewModel) > -1);
+      };
+
       ko.utils.registerEventHandler(element, 'click', function () {
-        element.checked = ! element.checked;
-        ko.utils.toggleDomNodeCssClass(element, 'fa-check', element.checked);
+        var currentIndex = selectedValues.indexOf(viewModel);
+        if (currentIndex === -1) {
+          selectedValues.push(viewModel);
+        } else if (currentIndex > -1) {
+          selectedValues.splice(currentIndex, 1);
+        }
       });
-      ko.bindingHandlers.checked.init(element, valueAccessor, allBindings);
 
-      ko.utils.toggleDomNodeCssClass(element, 'fa-check', element.checked);
-
-      valueAccessor().subscribe(function () {
-        ko.utils.toggleDomNodeCssClass(element, 'fa-check', element.checked);
-      })
+      selectedValues.subscribe(updateCheckedState);
+      updateCheckedState();
     }
   };
 
   ko.bindingHandlers.hueCheckAll = {
     init: function (element, valueAccessor, allBindings) {
-      var allSelected = ko.observable(false);
       var allValues = ko.utils.unwrapObservable(valueAccessor()).allValues;
       var selectedValues = ko.utils.unwrapObservable(valueAccessor()).selectedValues;
 
-      ko.bindingHandlers.hueChecked.init(element, function () {
-        return allSelected;
-      }, allBindings);
-
-      self.allTablesSelected = ko.observable(false);
-      self.selectedTables = ko.observableArray();
+      var updateCheckedState = function () {
+        ko.utils.toggleDomNodeCssClass(element, 'fa-check', selectedValues().length === allValues().length);
+        ko.utils.toggleDomNodeCssClass(element, 'fa-minus hue-uncheck', selectedValues().length > 0 && selectedValues().length !== allValues().length);
+      };
 
       ko.utils.registerEventHandler(element, 'click', function () {
-        if (allSelected() && selectedValues().length == 0) {
+        if (selectedValues().length == 0) {
           selectedValues(allValues().slice(0));
         } else {
           selectedValues([]);
         }
       });
 
-      selectedValues.subscribe(function (newValue) {
-        allSelected(newValue.length === allValues().length);
-        ko.utils.toggleDomNodeCssClass(element, 'fa-minus hue-uncheck', newValue.length > 0 && newValue.length !== allValues().length);
-      })
-      ko.utils.toggleDomNodeCssClass(element, 'fa-minus hue-uncheck', selectedValues().length > 0 && selectedValues().length !== allValues().length);
+      selectedValues.subscribe(updateCheckedState);
+      allValues.subscribe(updateCheckedState);
+      updateCheckedState();
     }
   };
 
@@ -3070,19 +3069,8 @@
         $parentFVOwnerElement.data('lastKnownHeights', null);
       }
 
-      var childBindingContext = bindingContext.createChildContext(
-          bindingContext.$rawData,
-          null,
-          function(context) {
-            ko.utils.extend(context, {
-              $parentForeachVisible: $element,
-              $parentForeachVisibleId: id,
-              $depth: depth + 1
-            });
-          });
-
       var entryMinHeight = options.minHeight;
-      var allEntries = options.data();
+      var allEntries = ko.utils.unwrapObservable(options.data);
 
       var visibleEntryCount = 0;
       var incrementLimit = 0; // The diff required to re-render, set to visibleCount below
@@ -3096,8 +3084,8 @@
         var newEntryCount = Math.ceil(Math.min($(window).innerHeight(), $container.innerHeight()) / entryMinHeight);
         if (newEntryCount !== visibleEntryCount) {
           var diff = newEntryCount - visibleEntryCount;
-          elementIncrement = options.elementIncrement || (newEntryCount * 4);
-          incrementLimit = options.incrementLimit || (newEntryCount * 2);
+          elementIncrement = options.elementIncrement || 25;
+          incrementLimit = options.incrementLimit || 5;
           visibleEntryCount = newEntryCount;
           endIndex += diff;
           huePubSub.publish('foreach.visible.update', id);
@@ -3115,6 +3103,20 @@
       if (endIndex > (allEntries.length - 1)) {
         endIndex = allEntries.length - 1;
       }
+
+      var childBindingContext = bindingContext.createChildContext(
+          bindingContext.$rawData,
+          null,
+          function(context) {
+            ko.utils.extend(context, {
+              $parentForeachVisible: $element,
+              $parentForeachVisibleId: id,
+              $depth: depth + 1,
+              $indexOffset: function() {
+                return startIndex;
+              }
+            });
+          });
 
       var $wrapper = $element.parent();
       if (!$wrapper.hasClass('foreach-wrapper')) {
@@ -3384,35 +3386,40 @@
         itemHeight = valueAccessor().itemHeight || 22,
         scrollable = valueAccessor().scrollable || 'body',
         scrollableOffset = valueAccessor().scrollableOffset || 0,
+        disableHueEachRowCount = valueAccessor().disableHueEachRowCount || 0,
         forceRenderSub = valueAccessor().forceRenderSub || null,
         renderTimeout = -1,
         dataHasChanged = true;
 
       var wrappable = $(element);
-      if ($parent.is('table')) {
-        wrappable = $parent;
-        $parent = wrappable.parent();
+      if (data.length > disableHueEachRowCount) {
+        if ($parent.is('table')) {
+          wrappable = $parent;
+          $parent = wrappable.parent();
+        }
+
+        if (!wrappable.parent().hasClass('hueach')) {
+          wrappable.wrap('<div class="hueach"></div>');
+          $parent = wrappable.parent();
+          wrappable.css({
+            position: 'absolute',
+            width: '100%'
+          });
+        }
+
+        $parent.height(data.length * itemHeight);
+        if (wrappable.is('table')) {
+          $parent.height($parent.height() + (data.length > 0 ? itemHeight : 0));
+        }
       }
 
-      if (!wrappable.parent().hasClass('hueach')) {
-        wrappable.wrap('<div class="hueach"></div>');
-        $parent = wrappable.parent();
-        wrappable.css({
-          position: 'absolute',
-          width: '100%'
-        });
-      }
-
-      $parent.height(data.length * itemHeight);
-      if (wrappable.is('table')) {
-        $parent.height($parent.height() + (data.length > 0 ? itemHeight : 0));
-      }
       try {
         if (ko.utils.domData.get(element, 'originalData') && JSON.stringify(ko.utils.domData.get(element, 'originalData')) === JSON.stringify(data)) {
           dataHasChanged = false;
         }
       }
-      catch (e) {}
+      catch (e) {
+      }
 
       if (dataHasChanged) {
         ko.utils.domData.set(element, 'originalData', data);
