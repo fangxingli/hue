@@ -1,3 +1,4 @@
+# encoding: utf-8
 #!/usr/bin/env python
 # Licensed to Cloudera, Inc. under one
 # or more contributor license agreements.  See the NOTICE file
@@ -15,6 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from django.utils.translation import ugettext as _
+
 DJANGO_APPS = ['metastore']
 NICE_NAME = "Metastore Manager"
 REQUIRES_HADOOP = True
@@ -24,5 +27,5 @@ MENU_INDEX = 20
 IS_URL_NAMESPACED = True
 
 PERMISSION_ACTIONS = (
-  ("write", "Allow DDL operations. Need the app access too."),
+  ("write", u"我的Allow DDL operations. Need the app access too."),
 )

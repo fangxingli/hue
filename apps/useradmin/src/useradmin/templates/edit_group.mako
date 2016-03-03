@@ -14,6 +14,9 @@
 ## See the License for the specific language governing permissions and
 ## limitations under the License.
 <%!
+import sys
+reload(sys)
+sys.setdefaultencoding('utf-8')
 from desktop.views import commonheader, commonfooter
 from desktop.lib.django_util import extract_field_data
 import urllib
