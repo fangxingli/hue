@@ -16,12 +16,12 @@ def is_selected(section, matcher):
             <li class="currentApp">
               <a href="/user_profile">
                 <img src="${ static('user_profile/art/icon_user_profile_48.png') }" class="app-icon" />
-                User Profile
+                用户画像
               </a>
              </li>
-             <li class="${is_selected(section, 'mytab1')}"><a href="#">标签甄选系统</a></li>
-             <li class="${is_selected(section, 'mytab2')}"><a href="#">标签热点分析</a></li>
-             <li class="${is_selected(section, 'mytab3')}"><a href="#">人群关系图谱</a></li>
+             <li class="${is_selected(section, 'tag_search')}"><a href="tag_search">标签甄选系统</a></li>
+             <li class="${is_selected(section, 'tag_heat')}"><a href="tag_heat">标签热点分析</a></li>
+             <li class="${is_selected(section, 'relationship')}"><a href="relationship">人群关系图谱</a></li>
           </ul>
         </div>
       </div>

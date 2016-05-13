@@ -19,8 +19,8 @@ def is_selected(section, matcher):
                 Boc
               </a>
              </li>
-             <li class="${is_selected(section, 'mytab')}"><a href="#">Tab 1</a></li>
-             <li class="${is_selected(section, 'mytab2')}"><a href="#">Tab 2</a></li>
+             <li class="${is_selected(section, 'query')}"><a href="/boc">查询场景</a></li>
+             <li class="${is_selected(section, 'management')}"><a href="/boc/admin">管理查询场景</a></li>
           </ul>
         </div>
       </div>

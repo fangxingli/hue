@@ -16,13 +16,9 @@
 # limitations under the License.
 
 from desktop.lib.django_util import render as grender
-
-def index(request):
-    return grender('index.mako', request, dict(date=datetime.datetime.now()))
-
 from django.shortcuts import render
 from models import *
-from django.http import HttpResponse
+from django.http import HttpResponse, Http404
 #from impala.dbapi import connect
 from django.views.decorators.csrf import csrf_exempt
 import time, os, sys, json, datetime
@@ -33,12 +29,35 @@ import pandas as pd
 # conn = connect('192.168.1.222', port=10000, auth_mechanism='PLAIN', user='hive')
 # c = conn.cursor()
 
-def query(request):
-    cates_stack = [(i.name, [j.name for j in i.querysubcate_set.all()]) for i in QueryCate.objects.all()]
+def index(request):
+    return grender('index.mako', request, dict(date=datetime.datetime.now()))
+
+
+def management(request):
+    return grender('management.mako', request, dict(date=datetime.datetime.now()))
+
+
+def query(request, query_subcate_id):
+    # if a == -1: a=1 else: a=a
+    query_subcate_id = (query_subcate_id == -1 and 1 or query_subcate_id)
+
+    # get all sub cates
+    cates_stack = [(i.name, [(j.name, j.id) for j in i.querysubcate_cate.all()]) for i in QueryCate.objects.all()]
+    try:
+        current_query = QuerySubCate.objects.get(pk=query_subcate_id)
+    except QuerySubCate.DoesNotExist:
+        raise Http404("No id = %s matches the given query" % query_subcate_id)
+    conditions = json.loads(current_query.condition_types).items()
+
     context = {
         'cates_stack': cates_stack,
+        'current_cate_id': query_subcate_id,
+        'current_cate_name': current_query.name,
+        'conditions': conditions,
     }
+
     return render(request, 'index.html', context)
+
 
 @csrf_exempt
 def get_hive(request):

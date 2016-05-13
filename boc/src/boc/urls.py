@@ -20,8 +20,9 @@ from django.views.generic import TemplateView
 
 urlpatterns = patterns('boc',
     url(r'^$', 'views.index'),
-    #url(r'^admin/', include(admin.site.urls)),
+    url(r'^admin/', 'views.management'),
     #url(r'^get_hive', 'boc.views.get_hive', name='get_hive'),
-    url(r'^query$', 'views.query', name='query'),
+    url(r'^query/(?P<query_subcate_id>[\d]+)/$', 'views.query', name='query'),
+    url(r'^query$', 'views.query', {'query_subcate_id': -1}),
 )
 

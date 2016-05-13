@@ -33,7 +33,7 @@ setup(
   author = 'TODO',
   packages = find_packages('src'),
   package_dir = {'': 'src'},
-  install_requires = ['setuptools', 'desktop'],
+  install_requires = ['setuptools', 'desktop', 'happybase'],
   entry_points = { 'desktop.sdk.application': 'user_profile=user_profile' },
   zip_safe = False,
   package_data = {

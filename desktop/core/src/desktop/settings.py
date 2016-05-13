@@ -129,6 +129,8 @@ STATIC_URL = '/static/'
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'build', 'static')
 
+BOWER_COMPONENTS_ROOT = os.path.join(BASE_DIR, 'bower_components/')
+
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
   'django.template.loaders.filesystem.Loader',
@@ -197,11 +199,19 @@ INSTALLED_APPS = [
 
     # App that keeps track of failed logins.
     'axes',
+
+    'djangobower'
 ]
 
 LOCALE_PATHS = [
   get_desktop_root('core/src/desktop/locale')
 ]
+
+STATICFILES_FINDERS = (
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+    'djangobower.finders.BowerFinder',
+)
 
 # Keep default values up to date
 TEMPLATE_CONTEXT_PROCESSORS = (
@@ -213,6 +223,20 @@ TEMPLATE_CONTEXT_PROCESSORS = (
   'django.contrib.messages.context_processors.messages',
    # Not default
   'desktop.context_processors.app_name',
+)
+
+BOWER_INSTALLED_APPS = (
+    'jquery#2.1.1',
+    'bootstrap#3.3.6',
+    'html5shiv#3.7.2',
+    'respond#1.4.2',
+    'datatables#1.10.10',
+    'datatables.net-buttons#1.1.1',
+    'knockout#3.4.0',
+    'knockout-validation#2.0.3',
+    'jquery-ui#1.11.4',
+    'bootstrap3-typeahead',
+    'echarts',
 )
 
 
@@ -457,6 +481,7 @@ if desktop.conf.SSL_CACERTS.get() and os.environ.get('REQUESTS_CA_BUNDLE') is No
 # Preventing local build failure by not validating the default value of REQUESTS_CA_BUNDLE
 if os.environ.get('REQUESTS_CA_BUNDLE') and os.environ.get('REQUESTS_CA_BUNDLE') != desktop.conf.SSL_CACERTS.config.default and not os.path.isfile(os.environ['REQUESTS_CA_BUNDLE']):
   raise Exception(_('SSL Certificate pointed by REQUESTS_CA_BUNDLE does not exist: %s') % os.environ['REQUESTS_CA_BUNDLE'])
+
 
 # Memory
 if desktop.conf.MEMORY_PROFILER.get():

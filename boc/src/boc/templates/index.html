@@ -21,7 +21,6 @@
     <!-- Just for debugging purposes. Don't actually copy these 2 lines! -->
     <!--[if lt IE 9]>{#<script src="{% static 'boc/js/ie8-responsive-file-warning.js' %}"></script>#}<![endif]-->
     <script src="{% static 'boc/js/ie-emulation-modes-warning.js' %}"></script>
-
     <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
     <!--[if lt IE 9]>
       <script src="{% static 'html5shiv/dist/html5shiv.min.js' %}"></script>
@@ -36,11 +35,11 @@
     <ul class="nav nav-pills">
         {% for cate, subcates in cates_stack %}
             <li role="presentation" class="dropdown {% if cate == '对私查询' %}active{% endif %}">
-                <a class="dropdown-toggle" data-toggle="dropdown" href="#" role="button" aria-haspopup="true" aria-expanded="false">{{ cate }} {% if subcate.length > 0 %}<span class="caret">{% endif %}</a>
-                {% if subcate.length > 0 %}
+                <a class="dropdown-toggle" data-toggle="dropdown" href="#" role="button" aria-haspopup="true" aria-expanded="false">{{ cate }} {% if subcates|length > 0 %}<span class="caret">{% endif %}</a>
+                {% if subcates|length > 0 %}
                 <ul class="dropdown-menu">
-                    {% for subcate in subcates %}
-                        <li><a href="#">{{ subcate }}</a></li>
+                    {% for name, id in subcates %}
+                        <li><a href="/boc/query/{{id}}">{{ name }}</a></li>
                     {% endfor %}
                 </ul>
                 {% endif %}
@@ -56,50 +55,52 @@
             <div class="col-md-2" id="sidebar">
                 <div class="panel panel-default" style="padding:5px;">
                     <ul class="nav nav-pills nav-stacked">
-                        <li role="presentation"><a href="#">客户信息查询</a></li>
+                        <li role="presentation"><a href="query">客户信息查询</a></li>
                         <li role="presentation"><a href="#">账户信息查询</a></li>
-                        <!--<li role="presentation"><a href="#">账户信息查询(新线)</a></li>-->
-                        <li role="presentation" class="active"><a href="#">历史交易查询</a></li>
-                        <!--<li role="presentation"><a href="#">历史交易查询(新线)</a></li>-->
+                        <li role="presentation" class="active"><a href="#">交易查询</a></li>
                     </ul>
                 </div>
             </div>
             <div class="col-md-10" id="search-content">
-                <div class="panel panel-default" style="padding:10px;">
-                    <form data-bind="submit: query">
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="form-inline">
-                                    <div class="form-group padding-bottom-10">
-                                        <label for="inputEmail3" class="control-label">证件号码:</label>
-                                        <input type="text" class="form-control" id="cred_num" data-bind="value: cred_num" placeholder="证件号码">
+                <div class="panel panel-default">
+                    <div class="panel-heading">
+                        <h3 class="panel-title">{{current_cate_name}}</h3>
+                    </div>
+                    <div class="panel-body">
+                        <form data-bind="submit: query">
+                            {% for k, v in conditions %}
+                            {% cycle '<div class="row">' ''  %}
+                                <div class="col-md-6">
+                                    <div class="form-inline">
+                                        <div class="form-group padding-bottom-10">
+                                            <label class="control-label">{{ v.name }}:</label>
+                                            {% if v.type == 'text' %}
+                                                <input type="text" class="form-control" id="{{ k }}" data-bind="value: {{ k }}" placeholder="{{ v.name }}">
+                                            {% elif v.type == 1 %}
+                                                <input type="text" class="form-control" id="{{ k }}_begin" data-bind="value: {{ k }}_begin" placeholder="开始日期"> -
+                                                <input type="text" class="form-control" id="{{ k }}_end" data-bind="value: {{ k }}_end" placeholder="结束日期">
+                                            {% elif v.type == 0 %}
+                                                <input type="text" class="form-control" id="{{ k }}" data-bind="value: {{ k }}" placeholder="日期">
+                                            {% endif %}
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="form-inline">
-                                    <div class="form-group padding-bottom-10" >
-                                        <label for="inputEmail3" class="control-label">交易日期:</label>
-                                        <input type="text" class="form-control" id="date_begin" data-bind="value: date_begin" placeholder="开始日期"> -
-                                        <input type="text" class="form-control" id="date_end" data-bind="value: date_end" placeholder="结束日期">
-                                    </div>
+                            {% cycle '' '</div>' %}
+                            {% endfor %}
+
+                            <div class="row">
+                                <div class="col-md-offset-8 col-md-4">
+                                    <button type="submit" class="btn btn-primary pull-right" data-bind="text: queryText, css: cssDisable">
+                                        查询
+                                    </button>
                                 </div>
                             </div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-offset-8 col-md-4">
-                                <button type="submit" class="btn btn-primary pull-right" data-bind="text: queryText, css: cssDisable">
-                                    查询
-                                </button>
-                                <button type="button" data-bind="click: ggg">asdf</button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="panel panel-default" style="padding:10px;">
-                    <table id="table" class="display" style="width:100%; white-space:nowrap;"></table>
+                        </form>
+                    </div>
+
+                    <div class="panel-body" style="padding:10px; border-top:1px solid #ddd;">
+                        <table id="table" class="display" style="width:100%; white-space:nowrap;"></table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -207,20 +208,20 @@
                 return value;
             }
         }),
-        cred_num : ko.observable("").extend({
-            required: {
-                message: ' 必填字段'
-            }
-        }),
-        custom_name: ko.observable(""),
-        date_begin: ko.observable(""),
-        date_end : ko.observable(""),
-
-        ggg: function(data, event){
-            event.preventDefault();
-            $("#sidebar").toggleClass("col-md-2 display-none");
-            $("#search-content").toggleClass("col-md-10 col-md-12");
-        },
+        {% for k, v in conditions %}
+            {% if v.required %}
+                {{ k }} : ko.observable("").extend({
+                    required: {
+                        message: ' 必填字段'
+                    }
+                }),
+            {% elif v.type == 1 %}
+                {{ k }}_begin : ko.observable(""),
+                {{ k }}_end : ko.observable(""),
+            {% else %}
+                {{ k }} : ko.observable(""),
+            {% endif %}
+        {% endfor %}
 
         query : function(){
             var self = this;

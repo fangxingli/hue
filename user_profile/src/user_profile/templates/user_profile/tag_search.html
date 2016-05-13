@@ -1,0 +1,285 @@
+{% extends 'user_profile/index.html' %}
+{% load static %}
+{% block content %}
+        <div class="col-sm-12 main">
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <h4>标签选择</h4>
+            </div>
+            <div class="panel-body">
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2" style="background: #eee;">
+                  <label>用户设备类型:</label>
+                </div>
+                <div class="col-sm-10">
+                  <div class="col-sm-2"><input type="checkbox" value="ios"> iOS</div>
+                  <div class="col-sm-2"><input type="checkbox" value="android"> Android</div>
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2"  style="background: #eee;">
+                  <label>用户地域:</label>
+                </div>
+                <div class="col-sm-10">
+                    <div class="col-sm-2">
+                      <select class="form-control" data-bind="value: country,
+                                                          event: {change: areaSelected.bind($data, 0)},
+                                                          optionsCaption: '选择国家',
+                                                          options: countries"
+                              data-width="auto"></select>
+                    </div>
+                    <div class="col-sm-2">
+                      <select class="form-control" data-bind="value: province,
+                                                            optionsCaption: '选择省份',
+                                                            event: {change: areaSelected.bind($data, 1)},
+                                                            options: provinces,
+                                                            enable: provinces().length > 0"
+                              data-width="auto"></select>
+                    </div>
+                    <div class="col-sm-2">
+                      <select class="form-control" data-bind="value: city,
+                                                            optionsCaption: '选择市',
+                                                            event: {change: areaSelected.bind($data, 2)},
+                                                            options: cities,
+                                                            enable: cities().length > 0"
+                              data-width="auto"></select>
+                    </div>
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2" style="background: #eee;">
+                  <label>选择标签:</label>
+                </div>
+                <div class="col-sm-10">
+                  <div class="col-sm-2">
+                    <div class="input-group">
+                      <input class="form-control typeahead" type="text" data-bind="textInput: include_tag" placeholder="标签名">
+                      <span class="input-group-btn"><button class="btn btn-default" data-bind="click: addTag.bind($data, 0)" type="button">+</button></span>
+                    </div>
+                  </div>
+                  <!-- ko foreach: include_tags -->
+                    <div class="col-sm-1"><div class="label label-success"><span data-bind="text: $data"></span><span data-bind="value: $data" class="glyphicon glyphicon-remove" aria-hidden="true"></span></div></div>
+                  <!-- /ko -->
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2" style="background: #eee;">
+                  <label>剔除标签:</label>
+                </div>
+                <div class="col-sm-10">
+                  <div class="col-sm-2">
+                    <div class="input-group">
+                      <input class="form-control typeahead" type="text" data-bind="textInput: exclude_tag" placeholder="标签名" >
+                      <span class="input-group-btn"><button class="btn btn-default" data-bind="click: addTag.bind($data, 1)" type="button">+</button></span>
+                    </div>
+                  </div>
+                  <!-- ko foreach: exclude_tags -->
+                    <div class="col-sm-1"><div class="label label-danger"><span data-bind="text: $data"></span><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></div></div>
+                  <!-- /ko -->
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-12">
+                  <input type="button" class="pull-right btn btn-primary" value="提交">
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+          <h2 class="sub-header">Section title</h2>
+          <div class="table-responsive">
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Header</th>
+                  <th>Header</th>
+                  <th>Header</th>
+                  <th>Header</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>1,001</td>
+                  <td>Lorem</td>
+                  <td>ipsum</td>
+                  <td>dolor</td>
+                  <td>sit</td>
+                </tr>
+                <tr>
+                  <td>1,002</td>
+                  <td>amet</td>
+                  <td>consectetur</td>
+                  <td>adipiscing</td>
+                  <td>elit</td>
+                </tr>
+                <tr>
+                  <td>1,003</td>
+                  <td>Integer</td>
+                  <td>nec</td>
+                  <td>odio</td>
+                  <td>Praesent</td>
+                </tr>
+                <tr>
+                  <td>1,003</td>
+                  <td>libero</td>
+                  <td>Sed</td>
+                  <td>cursus</td>
+                  <td>ante</td>
+                </tr>
+                <tr>
+                  <td>1,004</td>
+                  <td>dapibus</td>
+                  <td>diam</td>
+                  <td>Sed</td>
+                  <td>nisi</td>
+                </tr>
+                <tr>
+                  <td>1,005</td>
+                  <td>Nulla</td>
+                  <td>quis</td>
+                  <td>sem</td>
+                  <td>at</td>
+                </tr>
+                <tr>
+                  <td>1,006</td>
+                  <td>nibh</td>
+                  <td>elementum</td>
+                  <td>imperdiet</td>
+                  <td>Duis</td>
+                </tr>
+                <tr>
+                  <td>1,007</td>
+                  <td>sagittis</td>
+                  <td>ipsum</td>
+                  <td>Praesent</td>
+                  <td>mauris</td>
+                </tr>
+                <tr>
+                  <td>1,008</td>
+                  <td>Fusce</td>
+                  <td>nec</td>
+                  <td>tellus</td>
+                  <td>sed</td>
+                </tr>
+                <tr>
+                  <td>1,009</td>
+                  <td>augue</td>
+                  <td>semper</td>
+                  <td>porta</td>
+                  <td>Mauris</td>
+                </tr>
+                <tr>
+                  <td>1,010</td>
+                  <td>massa</td>
+                  <td>Vestibulum</td>
+                  <td>lacinia</td>
+                  <td>arcu</td>
+                </tr>
+                <tr>
+                  <td>1,011</td>
+                  <td>eget</td>
+                  <td>nulla</td>
+                  <td>Class</td>
+                  <td>aptent</td>
+                </tr>
+                <tr>
+                  <td>1,012</td>
+                  <td>taciti</td>
+                  <td>sociosqu</td>
+                  <td>ad</td>
+                  <td>litora</td>
+                </tr>
+                <tr>
+                  <td>1,013</td>
+                  <td>torquent</td>
+                  <td>per</td>
+                  <td>conubia</td>
+                  <td>nostra</td>
+                </tr>
+                <tr>
+                  <td>1,014</td>
+                  <td>per</td>
+                  <td>inceptos</td>
+                  <td>himenaeos</td>
+                  <td>Curabitur</td>
+                </tr>
+                <tr>
+                  <td>1,015</td>
+                  <td>sodales</td>
+                  <td>ligula</td>
+                  <td>in</td>
+                  <td>libero</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+{% endblock %}
+
+{% block jscontent %}
+    <!-- Bootstrap core JavaScript
+    ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
+    <script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
+    <!-- Just to make our placeholder images work. Don't actually copy the next line! -->
+    <script src="../../assets/js/vendor/holder.min.js"></script>
+    <!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+    <script src="../../assets/js/ie10-viewport-bug-workaround.js"></script>
+    <script src="{% static 'knockout/dist/knockout.js' %}"></script>
+    <script src="{% static 'knockout-validation/dist/knockout.validation.min.js' %}"></script>
+    <script src="{% static 'bootstrap3-typeahead/bootstrap3-typeahead.js' %}"></script>
+    <script language="javascript">
+      var viewModel = {
+        countries : ko.observableArray(['中国', '加拿大', '美国', '日本', '澳大利亚']),
+        country : ko.observable(),
+        provinces : ko.observableArray(),
+        province : ko.observable(),
+        cities : ko.observableArray(),
+        city : ko.observable(),
+        include_tag : ko.observable(),
+        exclude_tag : ko.observable(),
+        include_tags : ko.observableArray(),
+        exclude_tags : ko.observableArray(),
+        addTag : function(d, e){
+          var self = this;
+          if(d==1){
+            if(self.exclude_tags.indexOf(self.exclude_tag()) == -1)
+              self.exclude_tags.push( self.exclude_tag() );
+          }else{
+            if(self.include_tags.indexOf(self.include_tag()) == -1)
+              self.include_tags.push( self.include_tag() );
+          }
+        },
+        areaSelected : function(d, e){
+          var self = this;
+          $.post('city_service/',
+            {
+              'key': d,
+              'value': d==0 ? self.country() : self.province()
+            },
+            function(data){
+              if( d==0 ) {
+                self.provinces(data.provinces);
+              }
+              if( d==1 ) {
+                self.cities(data.cities);
+              }
+            },'json'
+          );
+        }
+      };
+
+      $("input.typeahead").typeahead({
+        source : function( query, process){
+          return $.post('word_search/', {'word': query}, function (data) {
+            return process(data.data);
+          })
+        }
+      });
+
+      ko.applyBindings(viewModel);
+    </script>
+{% endblock %}
