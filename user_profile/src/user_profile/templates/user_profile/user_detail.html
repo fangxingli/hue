@@ -8,7 +8,6 @@
     <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
     <meta name="description" content="">
     <meta name="author" content="">
-    <link rel="icon" href="../../favicon.ico">
 
     <title>Dashboard Template for Bootstrap</title>
 
@@ -34,11 +33,29 @@
   </head>
 
   <body>
-
+    <div id="demo"></div>
     <div class="container-fluid">
-      {% block content %}{% endblock %}
+      <div class="row">
+        <div class="col-md-4">
+          用户名: {{ username }}
+        </div>
+        <div class="col-md-4">
+          Email: {{ email }}
+        </div>
+        <div class="col-md-4">
+          电话: {{ phone }}
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-4">
+          上次登录时间: {{ last_login }}
+        </div>
+        <div class="col-md-4">
+          注册时间: {{ reg_time }}
+        </div>
+      </div>
     </div>
-
-    {% block jscontent %}{% endblock %}
+    <script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
+    <script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
   </body>
 </html>

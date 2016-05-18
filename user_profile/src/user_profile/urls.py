@@ -18,6 +18,8 @@
 from django.conf.urls import patterns, url
 from django.views.generic import TemplateView
 
+
+# Views
 urlpatterns = patterns('user_profile',
   url(r'^$', 'views.index'),
   url(r'^index', TemplateView.as_view(template_name='user_profile/tag_search.html')),
@@ -26,9 +28,15 @@ urlpatterns = patterns('user_profile',
   url(r'^tag_heat', 'views.tag_heat'),
   url(r'^relationship', 'views.relationship'),
   url(r'^city_service/', 'views.city_service'),
-  url(r'^tag_search/', 'views.include_tags_search'),
-  url(r'^recently_hot', 'views.recently_hot_tags'),
   url(r'^word_search', 'views.include_tags_search'),
   url(r'^_relationship', TemplateView.as_view(template_name='user_profile/relationship.html')),
-  url(r'^les_miserables', 'views.les_miserables')
+  url(r'^les_miserables', 'views.les_miserables'),
+  url(r'user_detail/', 'views.user_detail')
+)
+
+# API
+urlpatterns += patterns(
+  url(r'tag_query/', 'views.tag_query'),
+  url(r'^tag_search/', 'views.include_tags_search'),
+  url(r'^recently_hot', 'views.recently_hot_tags'),
 )

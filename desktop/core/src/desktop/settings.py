@@ -236,7 +236,10 @@ BOWER_INSTALLED_APPS = (
     'knockout-validation#2.0.3',
     'jquery-ui#1.11.4',
     'bootstrap3-typeahead',
+    'datatables#1.10.10',
+    'datatables.net-buttons#1.1.1',
     'echarts',
+    'jqcloud2',
 )
 
 

@@ -26,6 +26,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 from happybase import Connection
 from collections import Counter
+import json as json
 import itertools
 import pandas as pd
 import numpy as np
@@ -97,9 +98,11 @@ idtags = ['84629', '159968', '125276', '74060', '182696', '83387', '220097', '16
           '114559', '97409', '63809', '191161', '17176', '9212', '100682', '159526', '75242', '121288', '219346',
           '116270', '208362', '31376', '193062', '155123', '105613', '102482', '189729', '204513', '167412', '225706']
 conn = Connection('192.168.2.41')
+user_t = conn.table('haodou')
 keys_t = conn.table('tag_search_keys')
 id2tokens_t = conn.table('id2tokens')
 favs_t = conn.table('favs_by_time')
+user_tags_t = conn.table('haodou_user_tags') # 用户标签库
 country_index = [u'中国', u'加拿大', u'美国', u'日本', u'澳大利亚']
 
 
@@ -119,22 +122,43 @@ def relationship(request):
     return render('relationship.mako', request, dict(date=datetime.datetime.now()))
 
 
+def user_detail(request):
+    userid = request.POST.get("userid", '-1')
+    u = user_t.row(userid, ['user'])
+    context = {
+        'username': u['user:UserName'],
+        'email': u['user:Email'],
+        'phone': u['user:Mobile'],
+        'last_login': u['user:LoginTime'],
+        'reg_time': u['user:RegTime']
+    }
+    return render(request, 'user_profile/user_detail.html', context)
+
+
 @csrf_exempt
 def les_miserables(request):
-    print "SDFSDFSDFS"
     return HttpResponse(content=open('/home/lifangxing/workroom/hue/user_profile/src/user_profile/les-miserables.gexf').read(), content_type="xml")
 
 
 @csrf_exempt
 def city_service(request):
     key, value = int(request.POST.get('key', -1)), request.POST.get('value', '')
-    print key, value, str(type(key)), str(type(value))
     if key == 0 and value == u'中国':  # country == china
-        print "SDFSDFSDFSDFS*****************"
         return HttpResponse(json.dumps({'provinces': PROVINCE_DICT.values()}), content_type='application/json')
     elif key == 1:  # province
         return HttpResponse(json.dumps({'cities': CITY.get(value.encode('utf8'), {})}), content_type='application/json')
     return HttpResponse(json.dumps({'error': 'GG'}), content_type='application/json')
+
+
+@csrf_exempt
+def tag_query(request):
+    include_tags = request.POST.get('include_tags')
+    exclude_tags = request.POST.get('exclude_tags')
+    tags = user_tags_t.row('%s_2016-03-03' % include_tags.split(',')[0], ['tags:weight'])
+
+    return HttpResponse(json.dumps({
+        'data': [ {'userid': i[1], 'tag_value': i[2] } for i in json.loads(tags['tags:weight']) ]
+    }), content_type='application/json')
 
 
 @csrf_exempt
@@ -147,7 +171,6 @@ def include_tags_search(request):
 
 @csrf_exempt
 def recently_hot_tags(request):
-    print "ENENENENE"
     start = request.POST.get('sdate', '2016-03-12')
     end = request.POST.get('edate', '2016-03-18')
     # 时间距离

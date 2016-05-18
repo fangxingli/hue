@@ -1,7 +1,7 @@
 <%!from desktop.views import commonheader, commonfooter %>
 <%namespace name="shared" file="shared_components.mako" />
 
-${commonheader("User Profile", "user_profile", user) | n,unicode}
+${commonheader("User Profile", "user_profile", user, padding="70px") | n,unicode}
 ${shared.menubar(section='tag_search')}
 
 ## Use double hashes for a mako template comment
