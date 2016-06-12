@@ -239,7 +239,7 @@ BOWER_INSTALLED_APPS = (
     'datatables#1.10.10',
     'datatables.net-buttons#1.1.1',
     'echarts',
-    'jqcloud2',
+    'selectize'
 )
 
 

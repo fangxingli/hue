@@ -1,0 +1,257 @@
+{% extends 'user_profile/index.html' %}
+{% load static %}
+{% block content %}
+  <div class="col-sm-12 main">
+    <div class="panel panel-default">
+      <div class="panel-heading">
+        <h4>{{ pname }}</h4>
+      </div>
+      <div class="panel-body" style="border-bottom: 1px solid #ddd;">
+        <div class="col-md-4" id="terminal" style="height: 300px; border-right: 1px solid #ddd;"></div>
+        <div class="col-md-4" id="repurchase" style="height: 300px; border-right: 1px solid #ddd;"></div>
+        <div class="col-md-4" id="balance" style="height: 300px;"></div>
+      </div>
+      <div class="panel-body" style="border-bottom: 1px solid #ddd;">
+        <div id="hotline" class="col-sm-12" style="height: 400px;"></div>
+      </div>
+      <div class="panel-body">
+        <div id="weight-line" class="col-sm-12" style="height: 400px;"></div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block jscontent %}
+    <!-- Bootstrap core JavaScript
+    ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
+    <script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
+    <!-- Just to make our placeholder images work. Don't actually copy the next line! -->
+    <script src="../../assets/js/vendor/holder.min.js"></script>
+    <!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+    <script src="../../assets/js/ie10-viewport-bug-workaround.js"></script>
+    <script src="{% static 'knockout/dist/knockout.js' %}"></script>
+    <script src="{% static 'knockout-validation/dist/knockout.validation.min.js' %}"></script>
+    <script src="{% static 'bootstrap3-typeahead/bootstrap3-typeahead.min.js' %}"></script>
+    <script src="{% static 'echarts/dist/echarts.min.js' %}"></script>
+    <script src="{% static 'echarts/dist/extension/dataTool.min.js' %}"></script>
+    <script type="text/javascript">
+      var hotline_chart = echarts.init(document.getElementById('hotline'));
+
+      var terminal_chart = echarts.init(document.getElementById('terminal'));
+      var balance_chart = echarts.init(document.getElementById('balance'));
+      var repurchase_chart = echarts.init(document.getElementById('repurchase'));
+
+      terminal_chart.setOption({
+        tooltip: {
+          trigger: 'item',
+          formatter: "{a} <br/>{b}: {c} ({d}%)"
+        },
+        title:{
+          text: '申购终端',
+          top: 'top',
+          left: 'left'
+        },
+        series: [
+          {
+            name: '终端',
+            type: 'pie',
+            selectedMode: 'single',
+            radius: '55%',
+            center:['50%', '50%'],
+            data: [
+              {value: 335, name: 'ATM交易'},
+              {value: 310, name: '网上银行'},
+              {value: 234, name: '手机银行'},
+              {value: 1548, name: '微信', selected: true}
+            ]
+          }
+        ]
+      });
+
+      repurchase_chart.setOption({
+        tooltip: {
+          trigger: 'item',
+          formatter: "{a} <br/>{b}: {c} ({d}%)"
+        },
+        title:{
+          text: '申购次数',
+          top: 'top',
+          left: 'left'
+        },
+        series: [
+          {
+            name: '次数',
+            type: 'pie',
+            selectedMode: 'single',
+            radius: '55%',
+            center:['50%', '50%'],
+            data: [
+              {value: 30, name: '第2次购买'},
+              {value: 10, name: '第3次购买'},
+              {value: 2, name: '购买3次以上'},
+              {value: 135, name: '第1次购买', selected: true}
+            ]
+          }
+        ]
+      });
+
+      balance_chart.setOption({
+        tooltip: {
+          trigger: 'item',
+          formatter: "{a} <br/>{b}: {c} ({d}%)"
+        },
+        title:{
+          text: '申购前余额',
+          top: 'top',
+          left: 'left'
+        },
+        series: [
+          {
+            name: '余额',
+            type: 'pie',
+            selectedMode: 'single',
+            radius: '55%',
+            center:['50%', '50%'],
+            data: [
+              {value: 210, name: '10W-50W'},
+              {value: 99, name: '50W-100W'},
+              {value: 20, name: '100W以上'},
+              {value: 435, name: '5W-10W', selected: true}
+            ]
+          }
+        ]
+      });
+
+      hotline_chart.setOption({
+        tooltip: {
+          trigger: 'axis'
+        },
+        title:{
+          text: '按月购买趋势图',
+          top: 'bottom',
+          left: 'right'
+        },
+        toolbox: {
+            feature: {
+                dataView: {show: true, readOnly: false},
+                magicType: {show: true, type: ['bar']},
+                restore: {show: true},
+                saveAsImage: {show: true}
+            }
+        },
+        legend: {
+            data:['购买数', '复购数', '复购率']
+        },
+        xAxis: [
+            {
+                type: 'category',
+                data: ['4月','5月','6月','7月','8月','9月','10月','11月','12月','1月','2月','3月']
+            }
+        ],
+        yAxis: [
+            {
+                type: 'value',
+                name: '份数',
+                min: 0,
+                max: 1000,
+                interval: 200,
+                axisLabel: {
+                    formatter: '{value} 份'
+                }
+            },{
+                type: 'value',
+                name: '百分比',
+                min: 0,
+                max: 100,
+                interval: 20,
+                axisLabel: {
+                    formatter: '{value}%'
+                }
+            }
+        ],
+        series: [
+            {
+                name:'购买数',
+                type:'bar',
+                data:[746, 720, 703, 326, 893, 698, 324, 704, 838, 889, 601, 80]
+            },{
+                name: '复购数',
+                type: 'bar',
+                data: [447, 288, 492, 163, 198, 69, 97, 352, 562, 197, 540, 48]
+            },{
+                name:'复购率',
+                type:'line',
+                yAxisIndex: 1,
+                data:[59.9, 40.0, 70.0, 50.0, 22.2, 9.9, 29.9, 50.0, 67.1, 22.2, 89.9, 60.0]
+            }
+        ]
+      });
+
+      var viewModel = {
+        sdate: ko.observable(),
+        edate: ko.observable(),
+        date_submit: function(e){
+          var self = this;
+          $.post('recently_hot',
+            {
+              'sdate': self.sdate(),
+              'edate': self.edate()
+            },
+            function(data){
+              myChart.setOption({
+                tooltip: {
+                  position: 'top'
+                },
+                animation: false,
+                xAxis: {
+                  type: 'category',
+                  data: data.words
+                },
+                yAxis: {
+                  type: 'category',
+                  data: data.ds
+                },
+                visualMap: {
+                  min: 1,
+                  max: 10,
+                  calculable: true,
+                  orient: 'horizontal',
+                  left: 'center',
+
+                },
+                series: [{
+                  name: '标签卡',
+                  type: 'heatmap',
+                  data: data.data.map(function (item) {
+                    return [item[1], item[0], item[2] || '-'];
+                  }),
+                  label: {
+                    normal: {
+                      show: true
+                    }
+                  },
+                  itemStyle: {
+                    emphasis: {
+                      shadowBlur: 10,
+                      shadowColor: 'rgba(0, 0, 0, 0.5)'
+                    }
+                  }
+                }]
+              });
+            }, 'json');
+        }
+      };
+
+      $("input.typeahead").typeahead({
+        source: function (query, process) {
+          return $.post('tag_search/', {'word': query}, function (data) {
+            return process(data.data);
+          })
+        }
+      });
+
+      ko.applyBindings(viewModel);
+    </script>
+{% endblock %}

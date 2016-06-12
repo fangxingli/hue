@@ -1,0 +1,286 @@
+{% extends 'user_profile/index.html' %}
+{% load static %}
+
+{% block content %}
+        <div class="col-sm-12 main">
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <h4>标签选择</h4>
+            </div>
+            <div class="panel-body">
+{#              <div class="row" style="line-height: 34px;">#}
+{#                <div class="col-sm-2" style="background: #eee;">#}
+{#                  <label>用户设备类型:</label>#}
+{#                </div>#}
+{#                <div class="col-sm-10">#}
+{#                  <div class="col-sm-2"><input type="checkbox" value="ios"> iOS</div>#}
+{#                  <div class="col-sm-2"><input type="checkbox" value="android"> Android</div>#}
+{#                </div>#}
+{#              </div>#}
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2"  style="background: #eee;">
+                  <label>用户地域:</label>
+                </div>
+                <div class="col-sm-10">
+                    <div class="col-sm-2">
+                      <select class="form-control" data-bind="value: country,
+                                                          event: {change: area_selected.bind($data, 0)},
+                                                          optionsCaption: '选择国家',
+                                                          options: countries"
+                              data-width="auto"></select>
+                    </div>
+                    <div class="col-sm-2">
+                      <select class="form-control" data-bind="value: province,
+                                                            optionsCaption: '选择省份',
+                                                            event: {change: area_selected.bind($data, 1)},
+                                                            options: provinces,
+                                                            enable: provinces().length > 0"
+                              data-width="auto"></select>
+                    </div>
+                    <div class="col-sm-2">
+                      <select class="form-control" data-bind="value: city,
+                                                            optionsCaption: '选择市',
+                                                            event: {change: area_selected.bind($data, 2)},
+                                                            options: cities,
+                                                            enable: cities().length > 0"
+                              data-width="auto"></select>
+                    </div>
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2" style="background: #eee;">
+                  <label>选择标签:</label>
+                </div>
+                <div class="col-sm-10">
+                  <div class="col-sm-6">
+{#                      <input class="form-control typeahead" type="text" data-bind="textInput: include_tag" placeholder="选择标签名">#}
+{#                      <span class="input-group-btn"><button class="btn btn-default" data-bind="click: add_tag.bind($data, 0)" type="button">+</button></span>#}
+                      <input type="text" id="include_tag_input" class="form-control" placeholder="选择标签名">
+                  </div>
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-2" style="background: #eee;">
+                  <label>剔除标签:</label>
+                </div>
+                <div class="col-sm-10">
+                  <div class="col-sm-6">
+{#                      <input class="form-control typeahead" type="text" data-bind="textInput: exclude_tag" placeholder="标签名" >#}
+{#                      <span class="input-group-btn"><button class="btn btn-default" data-bind="click: add_tag.bind($data, 1)" type="button">+</button></span>#}
+                      <input type="text" id="exclude_tag_input" class="form-control" placeholder="剔除标签名">
+                  </div>
+                </div>
+              </div>
+              <div class="row" style="line-height: 34px;">
+                <div class="col-sm-12">
+                  <input type="button" class="pull-right btn btn-primary" data-bind="click: query" value="提交">
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+          <table id="table" class="display" style="width:100%; white-space:nowrap;"></table>
+          <div class="modal fade" id="myModal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+            <div class="modal-dialog modal-lg" role="document">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                  <h4 class="modal-title" id="myModalLabel">用户信息</h4>
+                </div>
+                <div class="modal-body">
+                  ...
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+{% endblock %}
+
+{% block jscontent %}
+    <!-- Bootstrap core JavaScript
+    ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
+    <script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
+    <!-- Just to make our placeholder images work. Don't actually copy the next line! -->
+    <script src="{% static 'datatables/media/js/jquery.dataTables.min.js' %}"></script>
+    <script src="{% static 'datatables.net-buttons/js/dataTables.buttons.min.js' %}"></script>
+    <script src="{% static 'datatables.net-buttons/js/buttons.html5.min.js' %}"></script>
+    <script src="{% static 'datatables.net-buttons/js/buttons.flash.min.js' %}"></script>
+    <script src="{% static 'datatables.net-buttons/js/buttons.print.min.js' %}"></script>
+    <script src="../../assets/js/vendor/holder.min.js"></script>
+    <!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+    <script src="../../assets/js/ie10-viewport-bug-workaround.js"></script>
+    <script src="{% static 'knockout/dist/knockout.js' %}"></script>
+    <script src="{% static 'knockout-validation/dist/knockout.validation.min.js' %}"></script>
+    <script src="{% static 'bootstrap3-typeahead/bootstrap3-typeahead.js' %}"></script>
+    <script src="{% static 'selectize/dist/js/standalone/selectize.min.js' %}"></script>
+    <script language="javascript">
+
+      var t = $('#table').dataTable({
+          'columns': [
+              {'data': 'userid', 'title': '用户ID'},
+              {'data': 'tag_value', 'title': '标签吻合度'}
+          ],
+          "language": {
+              "url": "{% static 'user_profile/js/language.zh-cn.json' %}"
+          },
+          'columnDefs':[
+            {
+              render: function(data, type, row){
+                return '<a href="/user_profile/user_detail?userid=' + row['userid'] + '" type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#myModal" data-remote="false">查看</a>'
+              },
+              targets: 2
+            },
+            {
+              render: function(data, type, row){
+                return data.substring(0,6).concat('**********').concat(data.substring(16, 22));
+              },
+              targets: 0
+            }
+          ],
+          'pageLength': 30,
+          'scrollX': true,
+          'scrollY': "900px",
+          'scrollCollapse': true,
+          'dom': 'Bfrtip',
+          'buttons': [
+
+          ]
+      });
+      var viewModel = {
+        countries : ko.observableArray(['中国', '加拿大', '美国', '日本', '澳大利亚']),
+        country : ko.observable(),
+        provinces : ko.observableArray(),
+        province : ko.observable(),
+        cities : ko.observableArray(),
+        city : ko.observable(),
+        include_tag : ko.observable(),
+        exclude_tag : ko.observable(),
+        include_tags : ko.observableArray(),
+        exclude_tags : ko.observableArray(),
+        user_detail : function () {
+          alert("asdfadsf");
+        },
+        add_tag : function(d, e){
+          var self = this;
+          if(d==1){
+            if(self.exclude_tags.indexOf(self.exclude_tag()) == -1)
+              self.exclude_tags.push( self.exclude_tag() );
+          }else{
+            if(self.include_tags.indexOf(self.include_tag()) == -1)
+              self.include_tags.push( self.include_tag() );
+          }
+        },
+        area_selected : function(d, e){
+          var self = this;
+          $.post('city_service/',
+            {
+              'key': d,
+              'value': d==0 ? self.country() : self.province()
+            },
+            function(data){
+              if( d==0 ) {
+                self.provinces(data.provinces);
+              }
+              if( d==1 ) {
+                self.cities(data.cities);
+              }
+            },'json'
+          );
+        },
+        query : function () {
+          var self = this;
+          t.fnClearTable();
+          $.post('tag_query/',
+            {
+              'include_tags': self.include_tags, 'exclude_tags': self.exclude_tags
+            },
+            function(data){
+              t.fnAddData(data.data);
+            }, 'json'
+          );
+        }
+      };
+
+      $('#include_tag_input').selectize({
+        delimiter: ',',
+        persist: false,
+        closeAfterSelect: true,
+        render: {
+            item: function (item, escape) {
+                return '<div style="background: #0099FF; color: #FFFFFF;" data-value="' + escape(item.name) + '">' + escape(item.name) + '</div>'
+            }
+        },
+        create: function(input) {
+            return {
+                value: input,
+                text: input
+            }
+        },
+        searchField: ['name'],
+        labelField: 'name',
+        valueField: 'name',
+        options:[
+           {name: '中额'}, {name: 'ATM交易'}, {name: '大额'}, {name: '网上交易'}, {name: '中频'}, {name: '小额'}, {name: '低频'}, {name: '取出'}, {name: '高频'}, {name: '人民币'}, {name: '存入'}
+        ],
+        onItemAdd: function(value){
+          viewModel.include_tags.push(value);
+        },
+        onDelete: function(value){
+          viewModel.include_tags.remove(function(item){
+            return item == value;
+          });
+        }
+      });
+
+      $('#exclude_tag_input').selectize({
+        delimiter: ',',
+        persist: false,
+        closeAfterSelect: true,
+        render: {
+            item: function (item, escape) {
+                return '<div style="background: #990000; color: #FFFFFF;" data-value="' + escape(item.name) + '">' + escape(item.name) + '</div>'
+            }
+        },
+        create: function(input) {
+            return {
+                value: input,
+                text: input
+            }
+        },
+        searchField: ['name'],
+        labelField: 'name',
+        valueField: 'name',
+        options:[
+           {name: '中额'}, {name: 'ATM交易'}, {name: '大额'}, {name: '网上交易'}, {name: '中频'}, {name: '小额'}, {name: '低频'}, {name: '取出'}, {name: '高频'}, {name: '人民币'}, {name: '存入'}
+        ],
+        onItemAdd: function(value){
+          viewModel.exclude_tags.push(value);
+        },
+        onDelete: function(value){
+          viewModel.exclude_tags.remove(function(item){
+            return item == value;
+          });
+        }
+      });
+
+      $("input.typeahead").typeahead({
+        source : function( query, process){
+          return $.post('word_search/', {'word': query}, function (data) {
+            return process(data.data);
+          })
+        }
+      });
+
+      ko.applyBindings(viewModel);
+
+      $("#myModal").on("show.bs.modal", function(e) {
+          var link = $(e.relatedTarget);
+          $(this).find(".modal-body").load(link.attr("href"));
+      });
+
+
+    </script>
+{% endblock %}

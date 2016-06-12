@@ -1,0 +1,116 @@
+{% extends 'user_profile/index.html' %}
+{% load static %}
+{% block content %}
+        <div class="col-sm-12 main">
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <h4>用户关系概况</h4>
+            </div>
+            <div class="panel-body">
+              <div id="relation_graph" class="col-sm-12" style="height: 500px;"></div>
+            </div>
+          </div>
+
+
+
+        </div>
+{% endblock %}
+
+{% block jscontent %}
+    <!-- Bootstrap core JavaScript
+    ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
+    <script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
+    <!-- Just to make our placeholder images work. Don't actually copy the next line! -->
+    <script src="../../assets/js/vendor/holder.min.js"></script>
+    <!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
+    <script src="../../assets/js/ie10-viewport-bug-workaround.js"></script>
+    <script src="{% static 'knockout/dist/knockout.js' %}"></script>
+    <script src="{% static 'knockout-validation/dist/knockout.validation.min.js' %}"></script>
+    <script src="{% static 'echarts/dist/echarts.min.js' %}"></script>
+    <script src="{% static 'echarts/dist/extension/dataTool.min.js' %}"></script>
+    <script src="{% static 'bootstrap3-typeahead/bootstrap3-typeahead.js' %}"></script>
+    <script language="javascript">
+      var myChart = echarts.init(document.getElementById('relation_graph'));
+      myChart.showLoading();
+      $.get('les_miserables', function (xml) {
+          myChart.hideLoading();
+
+          var graph = echarts.dataTool.gexf.parse(xml);
+          var categories = [];
+          for (var i = 0; i < 9; i++) {
+              categories[i] = {
+                  name: '类' + i
+              };
+          }
+          graph.nodes.forEach(function (node) {
+              node.itemStyle = null;
+              node.value = node.symbolSize;
+              node.symbolSize /= 1.5;
+              node.label = {
+                  normal: {
+                      show: node.symbolSize > 30
+                  }
+              };
+              node.label.normal.show = node.symbolSize > 30;
+              node.category = node.attributes.modularity_class;
+          });
+          option = {
+              title: {
+                  text: '转账关系',
+                  subtext: '环形布局',
+                  top: 'bottom',
+                  left: 'right'
+              },
+              toolbox:{
+                  show: true,
+                  feature: {
+                      dataView: {readOnly: false},
+                      restore: {},
+                      saveAsImage: {}
+                  }
+              },
+              tooltip: {},
+              legend: [{
+                  // selectedMode: 'single',
+                  data: categories.map(function (a) {
+                      return a.name;
+                  }),
+                  left: 'right',
+                  top: 'middle',
+                  orient: 'vertical'
+              }],
+              animationDurationUpdate: 1500,
+              animationEasingUpdate: 'quinticInOut',
+              series : [
+                  {
+                      name: '转账',
+                      type: 'graph',
+                      layout: 'none',
+                      data: graph.nodes,
+                      links: graph.links,
+                      categories: categories,
+                      roam: true,
+                      label: {
+                          normal: {
+                              position: 'right',
+                              formatter: '{b}'
+                          }
+                      },
+                      lineStyle: {
+                          normal: {
+                              curveness: 0.3
+                          }
+                      }
+                  }
+              ]
+          };
+
+          myChart.setOption(option);
+      }, 'xml');
+
+
+      ko.applyBindings(viewModel);
+    </script>
+{% endblock %}
