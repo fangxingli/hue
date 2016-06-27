@@ -41,4 +41,5 @@ urlpatterns += patterns('user_profile',
   url(r'tag_query/', 'views.tag_query'),
   url(r'^tag_search/', 'views.include_tags_search'),
   url(r'^recently_hot', 'views.recently_hot_tags'),
+  url(r'^api/user_financial_status/?$', 'views.user_financial_status'),
 )

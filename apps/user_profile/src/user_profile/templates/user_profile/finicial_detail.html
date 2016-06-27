@@ -3,20 +3,66 @@
 {% block content %}
   <div class="col-sm-12 main">
     <div class="panel panel-default">
-      <div class="panel-heading">
-        <h4>{{ pname }}</h4>
-      </div>
-      <div class="panel-body" style="border-bottom: 1px solid #ddd;">
-        <div class="col-md-4" id="terminal" style="height: 300px; border-right: 1px solid #ddd;"></div>
-        <div class="col-md-4" id="repurchase" style="height: 300px; border-right: 1px solid #ddd;"></div>
-        <div class="col-md-4" id="balance" style="height: 300px;"></div>
-      </div>
-      <div class="panel-body" style="border-bottom: 1px solid #ddd;">
-        <div id="hotline" class="col-sm-12" style="height: 400px;"></div>
+      <div class="panel-heading" style="margin-bottom: 10px;">
+        <h4>{{ pname }}<span>(2.04%客户达到申购标准)</span></h4>
       </div>
       <div class="panel-body">
-        <div id="weight-line" class="col-sm-12" style="height: 400px;"></div>
+        <div class="row">
+          <div class="col-md-4 col-sm-12">
+            <div id="threshold" style="border-bottom: 1px solid #ddd; height: 350px;"></div>
+            <div id="th-weight" style="height: 400px;"></div>
+          </div>
+          <div class="col-md-8 col-sm-12" style="border-bottom: 1px solid #ddd;">
+            <table id="user-list" style="display:none" class="table table-striped table-bordered" cellspacing="0" width="100%">
+              <thead>
+                <tr>
+                  <th>账户号</th>
+                  <th>性别</th>
+                  <th>年龄</th>
+                  <th>收支趋势<!--(支出型,收入型)--></th>
+                  <th>交易频度<!--(高频,中频,低频)--></th>
+                  <th>理财等级<!--(激进型,稳健型,无理财记录)--></th>
+                  <th>资金存量状况<!--(存量资金/交易量均值)--></th>
+                  <th>消费习惯<!--(网购型,理财型,定存型)--></th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+              {% for k in user_infos %}
+                <tr>
+                  <td>{{ k.idno }}</td>
+                  <td>{{ k.gender }}</td>
+                  <td>{{ k.age|floatformat:"0" }}</td>
+                  <td>{{ k.inout }}</td>
+                  <td>{{ k.freq }}</td>
+                  <td>{{ k.level }}</td>
+                  <td>
+                    {% if k.bal > 50000 %}
+                      <font style="color: #CC0000;">{{ k.bal }}</font>
+                    {% else %}
+                      <font style="color: #009900;">{{ k.bal }}</font>(<font style="color: #333333;">+{{ k.bal_std|floatformat }}</font>)
+                    {% endif %}
+                  </td>
+                  <td>{{ k.habit }}</td>
+                  <td><div class="details-control"><span class="glyphicon glyphicon-resize-full" aria-hidden="true"></span></div></td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+{#      <div class="panel-body" style="border-bottom: 1px solid #ddd;">#}
+{#        <div class="col-md-4" id="terminal" style="height: 300px; border-right: 1px solid #ddd;"></div>#}
+{#        <div class="col-md-4" id="repurchase" style="height: 300px; border-right: 1px solid #ddd;"></div>#}
+{#        <div class="col-md-4" id="balance" style="height: 300px;"></div>#}
+{#      </div>#}
+{#      <div class="panel-body" style="border-bottom: 1px solid #ddd;">#}
+{#        <div id="hotline" class="col-sm-12" style="height: 400px;"></div>#}
+{#      </div>#}
+{#      <div class="panel-body">#}
+{#        <div id="weight-line" class="col-sm-12" style="height: 400px;"></div>#}
+{#      </div>#}
     </div>
   </div>
 {% endblock %}
@@ -27,6 +73,8 @@
     <!-- Placed at the end of the document so the pages load faster -->
     <script src="{% static 'jquery/dist/jquery.min.js' %}"></script>
     <script src="{% static 'bootstrap/dist/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'datatables/media/js/jquery.dataTables.min.js' %}"></script>
+    <script src="{% static 'datatables/media/js/dataTables.bootstrap.min.js' %}"></script>
     <!-- Just to make our placeholder images work. Don't actually copy the next line! -->
     <script src="../../assets/js/vendor/holder.min.js"></script>
     <!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
@@ -37,158 +85,358 @@
     <script src="{% static 'echarts/dist/echarts.min.js' %}"></script>
     <script src="{% static 'echarts/dist/extension/dataTool.min.js' %}"></script>
     <script type="text/javascript">
-      var hotline_chart = echarts.init(document.getElementById('hotline'));
+      $(document).ready(function() {
+{#        var hotline_chart = echarts.init(document.getElementById('hotline'));#}
+{##}
+{#        var terminal_chart = echarts.init(document.getElementById('terminal'));#}
+{#        var balance_chart = echarts.init(document.getElementById('balance'));#}
+{#        var repurchase_chart = echarts.init(document.getElementById('repurchase'));#}
 
-      var terminal_chart = echarts.init(document.getElementById('terminal'));
-      var balance_chart = echarts.init(document.getElementById('balance'));
-      var repurchase_chart = echarts.init(document.getElementById('repurchase'));
+        var threshold_chart = echarts.init(document.getElementById('threshold'));
+        var th_weight = echarts.init(document.getElementById('th-weight'));
 
-      terminal_chart.setOption({
-        tooltip: {
-          trigger: 'item',
-          formatter: "{a} <br/>{b}: {c} ({d}%)"
-        },
-        title:{
-          text: '申购终端',
-          top: 'top',
-          left: 'left'
-        },
-        series: [
-          {
-            name: '终端',
-            type: 'pie',
-            selectedMode: 'single',
-            radius: '55%',
-            center:['50%', '50%'],
-            data: [
-              {value: 335, name: 'ATM交易'},
-              {value: 310, name: '网上银行'},
-              {value: 234, name: '手机银行'},
-              {value: 1548, name: '微信', selected: true}
-            ]
+
+        function format ( d ) {
+            // `d` is the original data object for the row
+            return '<div class="slider" id="user-' + d.idno + '" style="height: 300px;"></div>'+
+                   '<table class="table table-condensed table-bordered">' +
+                     '<tr>' +
+                       '<td>姓名: ' + d.name + '</td>' +
+                       '<td>开户号: ' + d.idno + '</td>' +
+                       '<td>电话: 18972635423</td>' +
+                     '</tr>' +
+                     '<tr>' +
+                        '<td colspan="3">消费支出最多: 快捷支付(33笔), 支出金额最多: 理财(30000)</td>' +
+                     '</tr>' +
+                     '<tr>' +
+                        '<td colspan="3">收入最多: 转账(13笔), 收入金额最多: 理财(60000)</td>' +
+                     '</tr>' +
+                     '<tr>' +
+                        '<td colspan="3">客户近期有交易频度走高, 交易金额降低趋势</td>' +
+                     '</tr>' +
+                   '</table>';
+        }
+
+        var data_table = $('#user-list').DataTable({
+          language: {
+            url: "{% static 'user_profile/js/language.zh-cn.json' %}"
+          },
+          pageLength: 15,
+          fnPreDrawCallback: function () {
+            $("#user-list").hide();
+          },
+          fnDrawCallback: function () {
+            $("#user-list").show();
+          },
+          columnDefs:[
+            {'targets': -1, 'orderable': false}
+          ],
+        });
+
+        $('#user-list tbody').on('click', 'td > .details-control', function(){
+          var tr = $(this).closest('tr');
+          var row = data_table.row( tr );
+
+          if ( row.child.isShown() ) {
+              // This row is already open - close it
+              $('div.slider', row.child()).slideUp( function () {
+                  row.child.hide();
+                  tr.removeClass('shown');
+              } );
           }
-        ]
-      });
-
-      repurchase_chart.setOption({
-        tooltip: {
-          trigger: 'item',
-          formatter: "{a} <br/>{b}: {c} ({d}%)"
-        },
-        title:{
-          text: '申购次数',
-          top: 'top',
-          left: 'left'
-        },
-        series: [
-          {
-            name: '次数',
-            type: 'pie',
-            selectedMode: 'single',
-            radius: '55%',
-            center:['50%', '50%'],
-            data: [
-              {value: 30, name: '第2次购买'},
-              {value: 10, name: '第3次购买'},
-              {value: 2, name: '购买3次以上'},
-              {value: 135, name: '第1次购买', selected: true}
-            ]
-          }
-        ]
-      });
-
-      balance_chart.setOption({
-        tooltip: {
-          trigger: 'item',
-          formatter: "{a} <br/>{b}: {c} ({d}%)"
-        },
-        title:{
-          text: '申购前余额',
-          top: 'top',
-          left: 'left'
-        },
-        series: [
-          {
-            name: '余额',
-            type: 'pie',
-            selectedMode: 'single',
-            radius: '55%',
-            center:['50%', '50%'],
-            data: [
-              {value: 210, name: '10W-50W'},
-              {value: 99, name: '50W-100W'},
-              {value: 20, name: '100W以上'},
-              {value: 435, name: '5W-10W', selected: true}
-            ]
-          }
-        ]
-      });
-
-      hotline_chart.setOption({
-        tooltip: {
-          trigger: 'axis'
-        },
-        title:{
-          text: '按月购买趋势图',
-          top: 'bottom',
-          left: 'right'
-        },
-        toolbox: {
-            feature: {
-                dataView: {show: true, readOnly: false},
-                magicType: {show: true, type: ['bar']},
-                restore: {show: true},
-                saveAsImage: {show: true}
-            }
-        },
-        legend: {
-            data:['购买数', '复购数', '复购率']
-        },
-        xAxis: [
-            {
-                type: 'category',
-                data: ['4月','5月','6月','7月','8月','9月','10月','11月','12月','1月','2月','3月']
-            }
-        ],
-        yAxis: [
-            {
-                type: 'value',
-                name: '份数',
-                min: 0,
-                max: 1000,
-                interval: 200,
-                axisLabel: {
-                    formatter: '{value} 份'
+          else {
+            // Open this row
+            $.post('/user_profile/api/user_financial_status/',
+                {
+                  userid: row.data()[0]
+                },
+                function(data){
+                  row.child(format(data), 'no-padding').show();
+                  tr.addClass('shown');
+                  $('div.slider', row.child()).slideDown(function () {
+                    $("td > .details-control")
+                    var user_detail_chart = echarts.init(document.getElementById('user-' + data.idno));
+                    user_detail_chart.setOption({
+                      color: ['#c23531', '#0099FF', '#61a0a8'],
+                      toolbox: {
+                        feature: {
+                          dataView: {show: true, readOnly: false},
+                          magicType: {show: true, type: ['line', 'bar']},
+                          restore: {show: true},
+                          saveAsImage: {show: true}
+                        }
+                      },
+                      title: {
+                        subtext: '近十天交易概况'
+                      },
+                      tooltip: {
+                        trigger: 'axis'
+                      },
+                      legend: {
+                        data: ['交易金额', '交易频度']
+                      },
+                      xAxis: {
+                        type: 'category',
+                        boundaryGap: false,
+                        data: data.date_series, //['2014-01-01', '2014-01-02', '2014-01-03', '2014-01-04', '2014-01-05', '2014-01-06', '2014-01-07', '2014-01-08', '2014-01-09', '2014-01-10']
+                      },
+                      yAxis: [{
+                        type: 'value',
+                        max: data.cnt_max + 2,
+                        min: 0,
+                        splitLine: {
+                          show: false
+                        },
+                        axisLabel: {
+                          formatter: '{value} 次'
+                        }
+                      },{
+                        type: 'value',
+                        splitLine: {
+                          show: false
+                        },
+                        max: data.sum_max + 1000,
+                        min: 0,
+                        axisLabel: {
+                          formatter: '{value} 元'
+                        }
+                      }],
+                      series: [{
+                        name: '交易频度',
+                        type: 'line',
+                        data:  data.cnt_series, //[3, 3, 5, 3, 2, 5, 5, 5, 7, 7],
+                        markLine: {
+                          data: [
+                            {yAxis: data.cnt_mean-data.cnt_std, name: '波动低值', symbolSize: [2,10], label: { normal: {show: false} }},
+                            {yAxis: data.cnt_mean+data.cnt_std, name: '波动高值', symbolSize: [2,10], label: { normal: {show: false} }}
+                          ]
+                        }
+                      },{
+                        name: '交易金额',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: data.sum_series, //[77658, 96723, 64504, 99995, 83921, 74736, 95645, 13911, 27840, 28152],
+                        markLine: {
+                          data: [
+                            {yAxis: data.sum_mean-data.sum_mean, name: '波动低值', symbolSize: [2,10], label: { normal: {show: false} }},
+                            {yAxis: data.sum_mean+data.sum_mean, name: '波动高值', symbolSize: [2,10], label: { normal: {show: false} }}
+                          ]
+                        }
+                      }]
+                    });
+                  });
                 }
-            },{
-                type: 'value',
-                name: '百分比',
-                min: 0,
-                max: 100,
-                interval: 20,
-                axisLabel: {
-                    formatter: '{value}%'
-                }
-            }
-        ],
-        series: [
-            {
-                name:'购买数',
-                type:'bar',
-                data:[746, 720, 703, 326, 893, 698, 324, 704, 838, 889, 601, 80]
-            },{
-                name: '复购数',
-                type: 'bar',
-                data: [447, 288, 492, 163, 198, 69, 97, 352, 562, 197, 540, 48]
-            },{
-                name:'复购率',
-                type:'line',
-                yAxisIndex: 1,
-                data:[59.9, 40.0, 70.0, 50.0, 22.2, 9.9, 29.9, 50.0, 67.1, 22.2, 89.9, 60.0]
-            }
-        ]
-      });
+            );
 
+
+          }
+        });
+
+        th_weight.setOption({
+          title: {
+              text: '申购达标影响权重'
+          },
+          tooltip: {},
+          legend: {
+              data: ['预算分配（Allocated Budget）', '实际开销（Actual Spending）']
+          },
+          radar: {
+              // shape: 'circle',
+              radius : '68%',
+              indicator:[
+                 { name: '消费习惯', max: 1},
+                 { name: '交易频度', max: 1},
+                 { name: '理财等级', max: 1},
+                 { name: '收支趋势', max: 1},
+                 { name: '年龄', max: 1}
+              ]
+          },
+          series: [{
+              name: '预算 vs 开销（Budget vs spending）',
+              type: 'radar',
+              itemStyle: {normal: {areaStyle: {type: 'default'}}},
+              data : [
+                  {
+                      value : [0.783, 0.672, 0.482, 0.221, 0.122],
+                      name : '预算分配'
+                  }
+              ]
+          }]
+        });
+
+        threshold_chart.setOption({
+          tooltip: {
+            trigger: 'item',
+            formatter: "{a} <br/>{b}: {c} ({d}%)"
+          },
+          title:{
+            text: '申购达标最大影响因素: 消费习惯',
+            subtext: '影响权重: 78.3%',
+            top: 'top',
+            left: 'left'
+          },
+          series: [
+            {
+              name: '消费习惯',
+              type: 'pie',
+              selectedMode: 'single',
+              radius: '55%',
+              center:['50%', '50%'],
+              data: [
+                {value: 8, name: '理财'},
+                {value: 4, name: '网购'},
+                {value: 33, name: '定存', selected: true}
+              ]
+            }
+          ]
+        });
+
+        terminal_chart.setOption({
+          tooltip: {
+            trigger: 'item',
+            formatter: "{a} <br/>{b}: {c} ({d}%)"
+          },
+          title:{
+            text: '申购终端',
+            top: 'top',
+            left: 'left'
+          },
+          series: [
+            {
+              name: '终端',
+              type: 'pie',
+              selectedMode: 'single',
+              radius: '55%',
+              center:['50%', '50%'],
+              data: [
+                {value: 335, name: 'ATM交易'},
+                {value: 310, name: '网上银行'},
+                {value: 234, name: '手机银行'},
+                {value: 1548, name: '微信', selected: true}
+              ]
+            }
+          ]
+        });
+
+        repurchase_chart.setOption({
+          tooltip: {
+            trigger: 'item',
+            formatter: "{a} <br/>{b}: {c} ({d}%)"
+          },
+          title:{
+            text: '申购次数',
+            top: 'top',
+            left: 'left'
+          },
+          series: [
+            {
+              name: '次数',
+              type: 'pie',
+              selectedMode: 'single',
+              radius: '55%',
+              center:['50%', '50%'],
+              data: [
+                {value: 30, name: '第2次购买'},
+                {value: 10, name: '第3次购买'},
+                {value: 2, name: '购买3次以上'},
+                {value: 135, name: '第1次购买', selected: true}
+              ]
+            }
+          ]
+        });
+
+        balance_chart.setOption({
+          tooltip: {
+            trigger: 'item',
+            formatter: "{a} <br/>{b}: {c} ({d}%)"
+          },
+          title:{
+            text: '申购前余额',
+            top: 'top',
+            left: 'left'
+          },
+          series: [
+            {
+              name: '余额',
+              type: 'pie',
+              selectedMode: 'single',
+              radius: '55%',
+              center:['50%', '50%'],
+              data: [
+                {value: 210, name: '10W-50W'},
+                {value: 99, name: '50W-100W'},
+                {value: 20, name: '100W以上'},
+                {value: 435, name: '5W-10W', selected: true}
+              ]
+            }
+          ]
+        });
+
+        hotline_chart.setOption({
+          tooltip: {
+            trigger: 'axis'
+          },
+          title:{
+            text: '按月购买趋势图',
+            top: 'bottom',
+            left: 'right'
+          },
+          toolbox: {
+              feature: {
+                  dataView: {show: true, readOnly: false},
+                  magicType: {show: true, type: ['bar']},
+                  restore: {show: true},
+                  saveAsImage: {show: true}
+              }
+          },
+          legend: {
+              data:['购买数', '复购数', '复购率']
+          },
+          xAxis: [
+              {
+                  type: 'category',
+                  data: ['4月','5月','6月','7月','8月','9月','10月','11月','12月','1月','2月','3月']
+              }
+          ],
+          yAxis: [
+              {
+                  type: 'value',
+                  name: '份数',
+                  min: 0,
+                  max: 1000,
+                  interval: 200,
+                  axisLabel: {
+                      formatter: '{value} 份'
+                  }
+              },{
+                  type: 'value',
+                  name: '百分比',
+                  min: 0,
+                  max: 100,
+                  interval: 20,
+                  axisLabel: {
+                      formatter: '{value}%'
+                  }
+              }
+          ],
+          series: [
+              {
+                  name:'购买数',
+                  type:'bar',
+                  data:[746, 720, 703, 326, 893, 698, 324, 704, 838, 889, 601, 80]
+              },{
+                  name: '复购数',
+                  type: 'bar',
+                  data: [447, 288, 492, 163, 198, 69, 97, 352, 562, 197, 540, 48]
+              },{
+                  name:'复购率',
+                  type:'line',
+                  yAxisIndex: 1,
+                  data:[59.9, 40.0, 70.0, 50.0, 22.2, 9.9, 29.9, 50.0, 67.1, 22.2, 89.9, 60.0]
+              }
+          ]
+        });
+      });
       var viewModel = {
         sdate: ko.observable(),
         edate: ko.observable(),

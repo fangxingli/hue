@@ -233,6 +233,39 @@ def include_tags_search(request):
 
 
 @csrf_exempt
+def user_financial_status(request):
+    userid = request.POST.get('userid', -1)
+
+    deal = pd.read_csv(join(split(abspath(__file__))[0], 'deal.csv'), sep=',')
+    username = deal[deal.idno==int(userid)].head(1).name.values[0]
+
+    m = deal[deal.idno==int(userid)].groupby('ct').apply(lambda x: pd.Series({
+                'deal_cnt': len(x),
+                'deal_sum': x.bal.sum()
+        })).sort_index().tail(10).reset_index()
+
+    if len(m) > 0:
+        mlist = m.to_dict('list')
+
+        return HttpResponse(json.dumps({
+            'name': username,
+            'status': u'资金流出趋势',
+            'idno': userid,
+            'date_series': mlist['ct'],
+            'cnt_series': [ round(i, 1) for i in mlist['deal_cnt'] ],
+            'sum_series': [ round(i, 2) for i in mlist['deal_sum'] ],
+            'cnt_mean': round(np.array(mlist['deal_cnt']).mean(), 1),
+            'cnt_std': round(np.array(mlist['deal_cnt']).std(), 1),
+            'sum_mean': round(np.array(mlist['deal_sum']).mean(), 1),
+            'sum_std': round(np.array(mlist['deal_sum']).std(), 1),
+            'cnt_max': max(mlist['deal_cnt']),
+            'sum_max': max(mlist['deal_sum']),
+        }), content_type='application/json')
+    else:
+        return HttpResponse(json.dumps({}), content_type='application/json')
+
+
+@csrf_exempt
 def financial(request, pcode=None):
     finical_map = {
         'counter': u'柜面',
@@ -246,15 +279,19 @@ def financial(request, pcode=None):
 
     ret = m[['pcode', 'pname', 'days', 'profits', 'money', 'channel', 'risk', 'sdate', 'edate', 'intsdate', 'expdate']].to_dict('record')
 
+    # 单个理财产品处理
     if pcode:
+        users = pd.read_csv(join(split(abspath(__file__))[0], 'summary.csv'), sep=',')
         context = {
-            'pname': m[m.pcode==pcode].pname.values[0]
+            'pname': m[m.pcode==pcode].pname.values[0],
+            'user_infos': users[users.bal + users.bal_std >= 50000].to_dict('record')
         }
         return render_to_response('user_profile/finicial_detail.html', context)
-    context = {
-        'financial_goods': ret
-    }
-    return render_to_response('user_profile/hot_statis.html', context)
+    else:
+        context = {
+            'financial_goods': ret
+        }
+        return render_to_response('user_profile/hot_statis.html', context)
 
 
 @csrf_exempt
