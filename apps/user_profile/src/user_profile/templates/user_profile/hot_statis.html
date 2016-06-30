@@ -85,126 +85,124 @@
     <script type="text/javascript">
 {#      var myChart = echarts.init(document.getElementById('hotbit'));#}
 {#      myChart.showLoading();#}
-      var hotline_chart = echarts.init(document.getElementById('hotline'));
-      $.get('recently_hot').done(function (data){
 
-      });
-
-      hotline_chart.setOption({
-        tooltip: {
-          trigger: 'axis'
-        },
-        toolbox: {
-            feature: {
-                dataView: {show: true, readOnly: false},
-                magicType: {show: true, type: ['line', 'bar']},
-                restore: {show: true},
-                saveAsImage: {show: true}
-            }
-        },
-        legend: {
-            data:['蒸发量','降水量','平均温度']
-        },
-        xAxis: [
-            {
-                type: 'category',
-                data: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
-            }
-        ],
-        yAxis: [
-            {
-                type: 'value',
-                name: '水量',
-                min: 0,
-                max: 250,
-                interval: 50,
-                axisLabel: {
-                    formatter: '{value} ml'
-                }
-            },
-            {
-                type: 'value',
-                name: '温度',
-                min: 0,
-                max: 25,
-                interval: 5,
-                axisLabel: {
-                    formatter: '{value} °C'
-                }
-            }
-        ],
-        series: [
-            {
-                name:'蒸发量',
-                type:'bar',
-                data:[2.0, 4.9, 7.0, 23.2, 25.6, 76.7, 135.6, 162.2, 32.6, 20.0, 6.4, 3.3]
-            }
-        ]
-      });
-
-      var viewModel = {
-        sdate: ko.observable(),
-        edate: ko.observable(),
-        date_submit: function(e){
-          var self = this;
-          $.post('recently_hot',
-            {
-              'sdate': self.sdate(),
-              'edate': self.edate()
-            },
-            function(data){
-              myChart.setOption({
-                tooltip: {
-                  position: 'top'
-                },
-                animation: false,
-                xAxis: {
-                  type: 'category',
-                  data: data.words
-                },
-                yAxis: {
-                  type: 'category',
-                  data: data.ds
-                },
-                visualMap: {
-                  min: 1,
-                  max: 10,
-                  calculable: true,
-                  orient: 'horizontal',
-                  left: 'center',
-
-                },
-                series: [{
-                  name: '标签卡',
-                  type: 'heatmap',
-                  data: data.data.map(function (item) {
-                    return [item[1], item[0], item[2] || '-'];
-                  }),
-                  label: {
-                    normal: {
-                      show: true
-                    }
-                  },
-                  itemStyle: {
-                    emphasis: {
-                      shadowBlur: 10,
-                      shadowColor: 'rgba(0, 0, 0, 0.5)'
-                    }
-                  }
-                }]
-              });
-            }, 'json');
-        }
-      };
-
-      $("input.typeahead").typeahead({
-        source: function (query, process) {
-          return $.post('tag_search/', {'word': query}, function (data) {
-            return process(data.data);
-          })
-        }
-      });
-
-      ko.applyBindings(viewModel);
+{#      var hotline_chart = echarts.init(document.getElementById('hotline'));#}
+{##}
+{#      hotline_chart.setOption({#}
+{#        tooltip: {#}
+{#          trigger: 'axis'#}
+{#        },#}
+{#        toolbox: {#}
+{#            feature: {#}
+{#                dataView: {show: true, readOnly: false},#}
+{#                magicType: {show: true, type: ['line', 'bar']},#}
+{#                restore: {show: true},#}
+{#                saveAsImage: {show: true}#}
+{#            }#}
+{#        },#}
+{#        legend: {#}
+{#            data:['蒸发量','降水量','平均温度']#}
+{#        },#}
+{#        xAxis: [#}
+{#            {#}
+{#                type: 'category',#}
+{#                data: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']#}
+{#            }#}
+{#        ],#}
+{#        yAxis: [#}
+{#            {#}
+{#                type: 'value',#}
+{#                name: '水量',#}
+{#                min: 0,#}
+{#                max: 250,#}
+{#                interval: 50,#}
+{#                axisLabel: {#}
+{#                    formatter: '{value} ml'#}
+{#                }#}
+{#            },#}
+{#            {#}
+{#                type: 'value',#}
+{#                name: '温度',#}
+{#                min: 0,#}
+{#                max: 25,#}
+{#                interval: 5,#}
+{#                axisLabel: {#}
+{#                    formatter: '{value} °C'#}
+{#                }#}
+{#            }#}
+{#        ],#}
+{#        series: [#}
+{#            {#}
+{#                name:'蒸发量',#}
+{#                type:'bar',#}
+{#                data:[2.0, 4.9, 7.0, 23.2, 25.6, 76.7, 135.6, 162.2, 32.6, 20.0, 6.4, 3.3]#}
+{#            }#}
+{#        ]#}
+{#      });#}
+{##}
+{#      var viewModel = {#}
+{#        sdate: ko.observable(),#}
+{#        edate: ko.observable(),#}
+{#        date_submit: function(e){#}
+{#          var self = this;#}
+{#          $.post('recently_hot',#}
+{#            {#}
+{#              'sdate': self.sdate(),#}
+{#              'edate': self.edate()#}
+{#            },#}
+{#            function(data){#}
+{#              myChart.setOption({#}
+{#                tooltip: {#}
+{#                  position: 'top'#}
+{#                },#}
+{#                animation: false,#}
+{#                xAxis: {#}
+{#                  type: 'category',#}
+{#                  data: data.words#}
+{#                },#}
+{#                yAxis: {#}
+{#                  type: 'category',#}
+{#                  data: data.ds#}
+{#                },#}
+{#                visualMap: {#}
+{#                  min: 1,#}
+{#                  max: 10,#}
+{#                  calculable: true,#}
+{#                  orient: 'horizontal',#}
+{#                  left: 'center',#}
+{##}
+{#                },#}
+{#                series: [{#}
+{#                  name: '标签卡',#}
+{#                  type: 'heatmap',#}
+{#                  data: data.data.map(function (item) {#}
+{#                    return [item[1], item[0], item[2] || '-'];#}
+{#                  }),#}
+{#                  label: {#}
+{#                    normal: {#}
+{#                      show: true#}
+{#                    }#}
+{#                  },#}
+{#                  itemStyle: {#}
+{#                    emphasis: {#}
+{#                      shadowBlur: 10,#}
+{#                      shadowColor: 'rgba(0, 0, 0, 0.5)'#}
+{#                    }#}
+{#                  }#}
+{#                }]#}
+{#              });#}
+{#            }, 'json');#}
+{#        }#}
+{#      };#}
+{##}
+{#      $("input.typeahead").typeahead({#}
+{#        source: function (query, process) {#}
+{#          return $.post('tag_search/', {'word': query}, function (data) {#}
+{#            return process(data.data);#}
+{#          })#}
+{#        }#}
+{#      });#}
+{##}
+{#      ko.applyBindings(viewModel);#}
     </script>
 {% endblock %}

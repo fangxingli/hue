@@ -4,7 +4,7 @@
   <div class="col-sm-12 main">
     <div class="panel panel-default">
       <div class="panel-heading" style="margin-bottom: 10px;">
-        <h4>{{ pname }}<span>(2.04%客户达到申购标准)</span></h4>
+        <h4>{{ pname }}<span>({{ user_percent }}%客户达到申购标准)</span></h4>
       </div>
       <div class="panel-body">
         <div class="row">
@@ -44,7 +44,7 @@
                     {% endif %}
                   </td>
                   <td>{{ k.habit }}</td>
-                  <td><div class="details-control"><span class="glyphicon glyphicon-resize-full" aria-hidden="true"></span></div></td>
+                  <td><div class="details-control"><span style="color: #0099FF;" class="glyphicon glyphicon-resize-full" aria-hidden="true"></span></div></td>
                 </tr>
               {% endfor %}
               </tbody>
@@ -121,6 +121,7 @@
           language: {
             url: "{% static 'user_profile/js/language.zh-cn.json' %}"
           },
+          bLengthChange: false,
           pageLength: 15,
           fnPreDrawCallback: function () {
             $("#user-list").hide();
@@ -141,6 +142,7 @@
               // This row is already open - close it
               $('div.slider', row.child()).slideUp( function () {
                   row.child.hide();
+                  tr.find("span").removeClass("glyphicon-resize-small").addClass("glyphicon-resize-full");
                   tr.removeClass('shown');
               } );
           }
@@ -151,10 +153,10 @@
                   userid: row.data()[0]
                 },
                 function(data){
+                  tr.find("span").removeClass("glyphicon-resize-full").addClass("glyphicon-resize-small");
                   row.child(format(data), 'no-padding').show();
                   tr.addClass('shown');
                   $('div.slider', row.child()).slideDown(function () {
-                    $("td > .details-control")
                     var user_detail_chart = echarts.init(document.getElementById('user-' + data.idno));
                     user_detail_chart.setOption({
                       color: ['#c23531', '#0099FF', '#61a0a8'],
@@ -178,7 +180,7 @@
                       xAxis: {
                         type: 'category',
                         boundaryGap: false,
-                        data: data.date_series, //['2014-01-01', '2014-01-02', '2014-01-03', '2014-01-04', '2014-01-05', '2014-01-06', '2014-01-07', '2014-01-08', '2014-01-09', '2014-01-10']
+                        data: data.date_series,
                       },
                       yAxis: [{
                         type: 'value',
@@ -204,7 +206,7 @@
                       series: [{
                         name: '交易频度',
                         type: 'line',
-                        data:  data.cnt_series, //[3, 3, 5, 3, 2, 5, 5, 5, 7, 7],
+                        data:  data.cnt_series,
                         markLine: {
                           data: [
                             {yAxis: data.cnt_mean-data.cnt_std, name: '波动低值', symbolSize: [2,10], label: { normal: {show: false} }},
@@ -215,7 +217,7 @@
                         name: '交易金额',
                         type: 'line',
                         yAxisIndex: 1,
-                        data: data.sum_series, //[77658, 96723, 64504, 99995, 83921, 74736, 95645, 13911, 27840, 28152],
+                        data: data.sum_series,
                         markLine: {
                           data: [
                             {yAxis: data.sum_mean-data.sum_mean, name: '波动低值', symbolSize: [2,10], label: { normal: {show: false} }},
@@ -236,29 +238,26 @@
           title: {
               text: '申购达标影响权重'
           },
-          tooltip: {},
-          legend: {
-              data: ['预算分配（Allocated Budget）', '实际开销（Actual Spending）']
+          legend:{
+              formatter: 'Legend {name}'
           },
+          tooltip: {},
           radar: {
               // shape: 'circle',
               radius : '68%',
               indicator:[
-                 { name: '消费习惯', max: 1},
-                 { name: '交易频度', max: 1},
-                 { name: '理财等级', max: 1},
-                 { name: '收支趋势', max: 1},
-                 { name: '年龄', max: 1}
+                {% for i in attr_names %}
+                  {name: '{{ i }}', max: {{ max_attr_w|floatformat:"5" }} },
+                {% endfor %}
               ]
           },
           series: [{
-              name: '预算 vs 开销（Budget vs spending）',
               type: 'radar',
               itemStyle: {normal: {areaStyle: {type: 'default'}}},
               data : [
                   {
-                      value : [0.783, 0.672, 0.482, 0.221, 0.122],
-                      name : '预算分配'
+                      value : {{ attr_weights|safe }},
+                      name : '权重'
                   }
               ]
           }]
@@ -270,8 +269,8 @@
             formatter: "{a} <br/>{b}: {c} ({d}%)"
           },
           title:{
-            text: '申购达标最大影响因素: 消费习惯',
-            subtext: '影响权重: 78.3%',
+            text: '申购达标最大影响因素: {{ max_attr }}',
+            subtext: '影响权重: {% widthratio max_attr_w 1 100 %}%',
             top: 'top',
             left: 'left'
           },
@@ -283,9 +282,9 @@
               radius: '55%',
               center:['50%', '50%'],
               data: [
-                {value: 8, name: '理财'},
-                {value: 4, name: '网购'},
-                {value: 33, name: '定存', selected: true}
+                {% for k, v in max_attr_pie %}
+                  {value: {{ v }}, name: '{{ k }}'},
+                {% endfor %}
               ]
             }
           ]
