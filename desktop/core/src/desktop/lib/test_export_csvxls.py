@@ -15,17 +15,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import openpyxl
 import StringIO
 
 from nose.tools import assert_equal
 from openpyxl import load_workbook
 
-from desktop.lib.export_csvxls import MAX_XLS_ROWS, MAX_XLS_COLS, create_generator, make_response
+from desktop.lib.export_csvxls import create_generator, make_response
 
 
 def content_generator(header, data):
   yield header, data
+
 
 def test_export_csv():
   headers = ["x", "y"]
@@ -38,6 +38,7 @@ def test_export_csv():
   content = ''.join(response.streaming_content)
   assert_equal('x,y\r\n1,2\r\n3,4\r\n"5,6",7\r\nNULL,NULL\r\n', content)
   assert_equal("attachment; filename=foo.csv", response["content-disposition"])
+
 
 def test_export_xls():
   headers = ["x", "y"]
@@ -55,43 +56,9 @@ def test_export_xls():
   assert_equal(expected_data, sheet_data)
   assert_equal("attachment; filename=foo.xlsx", response["content-disposition"])
 
-def test_export_xls_truncate_rows():
-  headers = ["a"]
-  data = [["1"]] * (MAX_XLS_ROWS + 1)
-  sheet = [headers] + data
-
-  # Check XLS
-  generator = create_generator(content_generator(headers, data), "xls")
-  response = make_response(generator, "xls", "foo")
-  assert_equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["content-type"])
-
-  sheet_data = _read_xls_sheet_data(response)
-  assert_equal(len(sheet[:MAX_XLS_ROWS + 1]), len(sheet_data))
-  assert_equal("attachment; filename=foo.xlsx", response["content-disposition"])
-
-def test_export_xls_truncate_cols():
-  headers = [u"a"] * (MAX_XLS_COLS + 1)
-  data = [[u"1"] * (MAX_XLS_COLS + 1)]
-  sheet = [headers] + data
-
-  # Check XLS
-  generator = create_generator(content_generator(headers, data), "xls")
-  response = make_response(generator, "xls", "foo")
-  assert_equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", response["content-type"])
-  expected_data = [[cell is not None and cell or "NULL" for cell in row][:MAX_XLS_COLS] for row in sheet]
-
-  sheet_data = _read_xls_sheet_data(response)
-  sheet_data[0] = sheet_data[0][:MAX_XLS_COLS]
-  sheet_data[1] = sheet_data[1][:MAX_XLS_COLS]
-  assert_equal(len(expected_data), len(sheet_data))
-  assert_equal(len(expected_data[0]), len(sheet_data[0]))
-
-  assert_equal(expected_data, sheet_data)
-  assert_equal("attachment; filename=foo.xlsx", response["content-disposition"])
-
 
 def _read_xls_sheet_data(response):
-  content = ''.join(response.streaming_content)
+  content = ''.join(response.content)
 
   data = StringIO.StringIO()
   data.write(content)

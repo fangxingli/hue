@@ -32,6 +32,7 @@ LOG = logging.getLogger(__name__)
 DEFAULT_USER = DEFAULT_USER.get()
 API_VERSION = 'v1' # Overridden to v2 for SLA
 
+
 _XML_CONTENT_TYPE = 'application/xml;charset=UTF-8'
 
 
@@ -39,6 +40,7 @@ def get_oozie(user, api_version=API_VERSION):
   oozie_url = OOZIE_URL.get()
   secure = SECURITY_ENABLED.get()
   ssl_cert_ca_verify = SSL_CERT_CA_VERIFY.get()
+
   return OozieApi(oozie_url, user, security_enabled=secure, api_version=api_version, ssl_cert_ca_verify=ssl_cert_ca_verify)
 
 

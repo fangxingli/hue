@@ -14,8 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 /*
- * jHue HDFS autocomplete plugin
- * augment a textbox into an HDFS autocomplete
+ * jHue generic autocomplete plugin
+ * augment a textbox into an generic hive/solr autocomplete
  */
 
 (function ($, window, document, undefined) {
@@ -32,7 +32,10 @@
         },
         smartTooltip: "",
         smartTooltipThreshold: 10, // needs 10 up/down or click actions and no tab to activate the smart tooltip
-        showOnFocus: false
+        showOnFocus: false,
+        startingPath: '',
+        rewriteVal: false,
+        searchEverywhere: false
       };
 
   function Plugin(element, options) {
@@ -84,7 +87,7 @@
     _el.keydown(function (e) {
       if (e.keyCode == 9) {
         e.preventDefault();
-        showHiveAutocomplete(function () {
+        showAutocomplete(function () {
           var path = _el.val();
           if (path.indexOf(".") > -1) {
             path = path.substr(path.lastIndexOf(".") + 1);
@@ -134,8 +137,15 @@
           $("#jHueGenericAutocomplete ul li").show();
           if (path != ""){
             $("#jHueGenericAutocomplete ul li").each(function () {
-              if ($(this).text().trim().indexOf(path) != 0) {
-                $(this).hide();
+              if (_this.options.searchEverywhere){
+                if ($(this).text().trim().toLowerCase().indexOf(path.toLowerCase()) == -1) {
+                  $(this).hide();
+                }
+              }
+              else {
+                if ($(this).text().trim().indexOf(path) != 0) {
+                  $(this).hide();
+                }
               }
             });
           }
@@ -165,7 +175,7 @@
       }
       if ((e.keyCode == 32 && e.ctrlKey) || e.keyCode == 191) {
         smartTooltipMaker();
-        showHiveAutocomplete();
+        showAutocomplete();
       }
       if (e.keyCode == 13) {
         _pauseBlur = true;
@@ -182,7 +192,7 @@
 
     if (_this.options.showOnFocus){
       _el.on("focus", function(){
-        showHiveAutocomplete();
+        showAutocomplete();
       });
     }
 
@@ -201,12 +211,15 @@
       BASE_PATH = "/impala/api/autocomplete/";
     }
     if (_this.options.serverType == "SOLR"){
-      BASE_PATH = "/indexer/api/collections/";
+      BASE_PATH = "/indexer/api/autocomplete/";
     }
     var _currentFiles = [];
 
-    function showHiveAutocomplete(callback) {
+    function showAutocomplete(callback) {
       var path = _el.val();
+      if (_this.options.startingPath != ''){
+        path = _this.options.startingPath + path;
+      }
       var autocompleteUrl = BASE_PATH;
 
       if (path != "" && path.indexOf(".") == -1) {
@@ -214,7 +227,7 @@
       }
 
       if (path != "" && path.lastIndexOf(".") != path.length - 1) {
-        path = path.substring(0, _el.val().lastIndexOf("."));
+        path = path.substring(0, (_this.options.startingPath + _el.val()).lastIndexOf("."));
       }
 
       if (_this.options.serverType != "SOLR") {
@@ -255,15 +268,27 @@
             }
           }
 
-          if (! _isSkipColumns){
+          var firstSolrCollection = false;
+          var firstSolrConfig = false;
+
+          if (!_isSkipColumns) {
             $(_iterable).each(function (cnt, item) {
               if (_this.options.serverType == "SOLR") {
-                if (!item.isCoreOnly){
-                  _currentFiles.push('<li class="hiveAutocompleteItem" data-value="' + item.name + '" title="' + item.name + '"><i class="fa '+ _ico +'"></i> ' + item.name + '</li>');
+                if (item.isCollection && !firstSolrCollection) {
+                  _currentFiles.push('<li class="hiveAutocompleteItem" data-value="collections.*" title="collections.*"><i class="fa fa-search-plus"></i> collections.*</li>');
+                  firstSolrCollection = true;
                 }
+                if (item.isConfig) {
+                  _ico = 'fa-cog';
+                  if (!firstSolrConfig) {
+                    _currentFiles.push('<li class="hiveAutocompleteItem" data-value="configs.*" title="configs.*"><i class="fa fa-cogs"></i> configs.*</li>');
+                    firstSolrConfig = true;
+                  }
+                }
+                _currentFiles.push('<li class="hiveAutocompleteItem" data-value="' + item.name + '" title="' + item.name + '"><i class="fa ' + _ico + '"></i> ' + item.name + '</li>');
               }
               else {
-                _currentFiles.push('<li class="hiveAutocompleteItem" data-value="' + item + '" title="' + item + '"><i class="fa '+ _ico +'"></i> ' + item + '</li>');
+                _currentFiles.push('<li class="hiveAutocompleteItem" data-value="' + item + '" title="' + item + '"><i class="fa ' + _ico + '"></i> ' + item + '</li>');
               }
             });
 
@@ -275,18 +300,26 @@
               var item = $(this).text().trim();
               var path = autocompleteUrl.substring(BASE_PATH.length);
 
-              if ($(this).html().indexOf("search") > -1) {
-                _el.val("collections." + item);
+              if ($(this).html().indexOf("search") > -1 || $(this).html().indexOf("cog") > -1) {
+                if ($(this).html().indexOf("search") > -1 && $(this).html().indexOf("search-plus") == -1) {
+                  _el.val("collections." + item);
+                }
+                else if ($(this).html().indexOf("cog") > -1 && $(this).html().indexOf("cogs") == -1) {
+                  _el.val("configs." + item);
+                }
+                else {
+                  _el.val(item);
+                }
                 _this.options.onPathChange(_el.val());
                 $("#jHueGenericAutocomplete").hide();
                 _hiveAutocompleteSelectedIndex = -1;
                 _this.options.onEnter(_el);
               }
 
-              if ($(this).html().indexOf("database") > -1){
+              if ($(this).html().indexOf("database") > -1) {
                 _el.val(item + ".");
                 _this.options.onPathChange(_el.val());
-                showHiveAutocomplete();
+                showAutocomplete();
               }
 
               if ($(this).html().indexOf("table") > -1){
@@ -299,14 +332,19 @@
                   }
                 }
                 else {
-                  _el.val(_el.val() + item);
+                  if (_this.options.rewriteVal) {
+                    _el.val(item);
+                  }
+                  else {
+                    _el.val(_el.val() + item);
+                  }
                 }
                 if (! _this.options.skipColumns){
                   _el.val(_el.val() + ".");
                 }
                 _this.options.onPathChange(_el.val());
                 if (! _this.options.skipColumns) {
-                  showHiveAutocomplete();
+                  showAutocomplete();
                 }
                 else {
                   _this.options.onEnter(_el);
@@ -359,7 +397,7 @@
         _el.val(_el.val() + $(possibleMatches[0]).text().trim().substr(lastChars.length));
         if ($(possibleMatches[0]).html().indexOf("folder") > -1) {
           _el.val(_el.val() + "/");
-          showHiveAutocomplete();
+          showAutocomplete();
         }
       }
       else if (possibleMatches.length > 1) {

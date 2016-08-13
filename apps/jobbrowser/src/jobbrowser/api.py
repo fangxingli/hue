@@ -17,8 +17,11 @@
 
 import logging
 
+from django.utils.translation import ugettext as _
+
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.paginator import Paginator
+from desktop.lib.rest.http_client import RestException
 
 from hadoop import cluster
 from hadoop.cluster import jt_ha, rm_ha
@@ -26,8 +29,9 @@ from hadoop.api.jobtracker.ttypes import ThriftJobPriority, TaskTrackerNotFoundE
 
 import hadoop.yarn.history_server_api as history_server_api
 import hadoop.yarn.mapreduce_api as mapreduce_api
-import hadoop.yarn.resource_manager_api as resource_manager_api
 import hadoop.yarn.node_manager_api as node_manager_api
+import hadoop.yarn.resource_manager_api as resource_manager_api
+import hadoop.yarn.spark_history_server_api as spark_history_server_api
 
 from jobbrowser.conf import SHARE_JOBS
 from jobbrowser.models import Job, JobLinkage, TaskList, Tracker
@@ -172,7 +176,8 @@ class YarnApi(JobBrowserApi):
     self.user = user
     self.resource_manager_api = resource_manager_api.get_resource_manager(user.username)
     self.mapreduce_api = mapreduce_api.get_mapreduce_api(user.username)
-    self.history_server_api = history_server_api.get_history_server_api()
+    self.history_server_api = history_server_api.get_history_server_api(user.username)
+    self.spark_history_server_api = spark_history_server_api.get_history_server_api()  # Spark HS does not support setuser
 
   def get_job_link(self, job_id):
     return self.get_job(job_id)
@@ -218,38 +223,59 @@ class YarnApi(JobBrowserApi):
 
   @rm_ha
   def get_job(self, jobid):
+
+    job_id = jobid.replace('application', 'job')
+    app_id = jobid.replace('job', 'application')
+
     try:
-      # App id
-      jobid = jobid.replace('job', 'application')
-      job = self.resource_manager_api.app(jobid)['app']
+      app = self.resource_manager_api.app(app_id)['app']
 
-      if job['state'] == 'ACCEPTED':
-        raise ApplicationNotRunning(jobid, job)
-      elif job['state'] == 'KILLED':
-        return KilledYarnJob(self.resource_manager_api, job)
-
-      if job.get('applicationType') == 'SPARK':
-        job = SparkJob(job, self.resource_manager_api)
-      elif job.get('applicationType') == 'MAPREDUCE':
-        jobid = jobid.replace('application', 'job')
-
-        if job['state'] in ('NEW', 'SUBMITTED', 'ACCEPTED', 'RUNNING'):
-          json = self.mapreduce_api.job(self.user, jobid)
-          job = YarnJob(self.mapreduce_api, json['job'])
+      if app['finalStatus'] in ('SUCCEEDED', 'FAILED', 'KILLED'):
+        if app['applicationType'] == 'SPARK':
+          job = SparkJob(app, rm_api=self.resource_manager_api, hs_api=self.spark_history_server_api)
+        elif app['state'] == 'KILLED':
+          job = KilledYarnJob(self.resource_manager_api, app)
         else:
-          json = self.history_server_api.job(self.user, jobid)
-          job = YarnJob(self.history_server_api, json['job'])
+          resp = self.history_server_api.job(self.user, job_id)
+          job = YarnJob(self.history_server_api, resp['job'])
       else:
-        job = Application(job, self.resource_manager_api)
+        if app['state'] == 'ACCEPTED':
+          raise ApplicationNotRunning(app_id, app)
+        # The MapReduce API only returns JSON when the application is in a RUNNING state
+        elif app['state'] in ('NEW', 'SUBMITTED', 'RUNNING') and app['applicationType'] == 'MAPREDUCE':
+          resp = self.mapreduce_api.job(self.user, job_id)
+          if not isinstance(resp, dict):
+            raise PopupException(_('Mapreduce Proxy API did not return JSON response, check if the job is running.'))
+          job = YarnJob(self.mapreduce_api, resp['job'])
+        else:
+          job = Application(app, self.resource_manager_api)
+    except RestException, e:
+      if e.code == 404:  # Job not found in RM so attempt to find job in History Server
+        resp = self.history_server_api.job(self.user, job_id)
+        job = YarnJob(self.history_server_api, resp['job'])
+      else:
+        raise JobExpired(app_id)
     except ApplicationNotRunning, e:
       raise e
     except Exception, e:
-      if 'NotFoundException' in str(e):
-        raise JobExpired(jobid)
-      else:
-        raise PopupException('Job %s could not be found: %s' % (jobid, e), detail=e)
+      raise PopupException('Job %s could not be found: %s' % (jobid, e), detail=e)
 
     return job
+
+  def get_application(self, jobid):
+    app = None
+    app_id = jobid.replace('job', 'application')
+
+    try:
+      app = self.resource_manager_api.app(app_id)['app']
+    except RestException, e:
+      raise PopupException(_('Job %s could not be found in Resource Manager: %s') % (jobid, e), detail=e)
+    except ApplicationNotRunning, e:
+      raise PopupException(_('Application is not running: %s') % e, detail=e)
+    except Exception, e:
+      raise PopupException(_('Job %s could not be found: %s') % (jobid, e), detail=e)
+
+    return app
 
   def get_tasks(self, jobid, **filters):
     filters.pop('pagenum')

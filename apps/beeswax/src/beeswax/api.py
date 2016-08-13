@@ -279,7 +279,7 @@ def close_operation(request, query_history_id):
 
 
 @error_handler
-def explain_directly(request, query, design, query_server):
+def explain_directly(request, query_server, query):
   explanation = dbms.get(request.user, query_server).explain(query)
 
   response = {
@@ -325,7 +325,7 @@ def execute(request, design_id=None):
 
             try:
               if explain:
-                return explain_directly(request, query, design, query_server)
+                return explain_directly(request, query_server, query)
               else:
                 return execute_directly(request, query, design, query_server, parameters=parameters)
 
@@ -341,7 +341,7 @@ def execute(request, design_id=None):
       # Non-parameterized query
       query = HQLdesign(query_form, query_type=query_type)
       if request.GET.get('explain', 'false').lower() == 'true':
-        return explain_directly(request, query, design, query_server)
+        return explain_directly(request, query_server, query)
       else:
         return execute_directly(request, query, design, query_server)
     else:
@@ -623,21 +623,34 @@ def clear_history(request):
 
 
 @error_handler
-def get_sample_data(request, database, table):
-  query_server = dbms.get_query_server_config(get_app_name(request))
+def get_sample_data(request, database, table, column=None):
+  app_name = get_app_name(request)
+  query_server = get_query_server_config(app_name)
   db = dbms.get(request.user, query_server)
+
+  response = _get_sample_data(db, database, table, column)
+  return JsonResponse(response)
+
+
+def _get_sample_data(db, database, table, column):
+  table_obj = db.get_table(database, table)
+  sample_data = db.get_sample(database, table_obj, column)
   response = {'status': -1}
 
-  table_obj = db.get_table(database, table)
-  sample_data = db.get_sample(database, table_obj)
   if sample_data:
+    sample = escape_rows(sample_data.rows(), nulls_only=True)
+    if column:
+      sample = set([row[0] for row in sample])
+      sample = [[item] for item in sorted(list(sample))]
+
     response['status'] = 0
     response['headers'] = sample_data.cols()
-    response['rows'] = escape_rows(sample_data.rows(), nulls_only=True)
+    response['full_headers'] = sample_data.full_cols()
+    response['rows'] = sample
   else:
     response['message'] = _('Failed to get sample data.')
 
-  return JsonResponse(response)
+  return response
 
 
 @error_handler

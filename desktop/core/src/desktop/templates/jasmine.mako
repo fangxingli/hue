@@ -14,23 +14,6 @@
 ## See the License for the specific language governing permissions and
 ## limitations under the License.
 ##
-##
-## no spaces in this method please; we're declaring a CSS class, and ART uses this value for stuff, and it splits on spaces, and
-## multiple spaces and line breaks cause issues
 
-<%inherit file="common_jasmine.mako"/>
-
-<%block name="specs">
-  <script type="text/javascript" charset="utf-8">
-  require(['jasmine-boot', 'jasmine'], function () {
-    // Add specs below
-    require([
-      'desktop/spec/sqlAutocompleterSpec',
-      'desktop/spec/hdfsAutocompleterSpec'
-    ], function() {
-      window.onload();
-    });
-  });
-  </script>
-</%block>
+<%include file="jasmineRunner.html"/>
 

@@ -26,20 +26,25 @@ from dateutil.parser import parse
 from string import Template
 
 from django.core.urlresolvers import reverse
+from django.db.models import Q
 from django.utils.encoding import force_unicode
 from django.utils.translation import ugettext as _
+from django.contrib.auth.models import User
 
+from desktop.conf import USE_DEFAULT_CONFIGURATION
 from desktop.lib import django_mako
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.i18n import smart_str
 from desktop.lib.json_utils import JSONEncoderForHTML
-from desktop.models import Document2
+from desktop.models import DefaultConfiguration, Document2, Document
 
 from hadoop.fs.hadoopfs import Hdfs
 from hadoop.fs.exceptions import WebHdfsException
 
+from liboozie.oozie_api import get_oozie
 from liboozie.submission2 import Submission
 from liboozie.submission2 import create_directories
+from notebook.models import Notebook
 
 from oozie.conf import REMOTE_SAMPLE_DIR
 from oozie.utils import utc_datetime_format, UTC_TIME_FORMAT, convert_to_server_timezone
@@ -64,7 +69,9 @@ class Job(object):
 
   @classmethod
   def get_workspace(cls, user):
-    return (REMOTE_SAMPLE_DIR.get() + '/hue-oozie-$TIME').replace('$USER', user.username).replace('$TIME', str(time.time()))
+    if not isinstance(user, basestring):
+      user = user.username
+    return (REMOTE_SAMPLE_DIR.get() + '/hue-oozie-$TIME').replace('$USER', user).replace('$TIME', str(time.time()))
 
   @property
   def validated_name(self):
@@ -84,12 +91,32 @@ class Job(object):
   def __str__(self):
     return '%s' % force_unicode(self.name)
 
+  def deployment_dir(self):
+    return None
 
-class Workflow(Job):
-  XML_FILE_NAME = 'workflow.xml'
-  PROPERTY_APP_PATH = 'oozie.wf.application.path'
+  def check_workspace(self, fs, user):
+    # Create optional default root workspace for the first submission
+    if REMOTE_SAMPLE_DIR.get() == REMOTE_SAMPLE_DIR.config.default_value:
+      create_directories(fs, [REMOTE_SAMPLE_DIR.get()])
+
+    Submission(user, self, fs, None, {})._create_dir(self.deployment_dir)
+    Submission(user, self, fs, None, {})._create_dir(Hdfs.join(self.deployment_dir, 'lib'))
+
+  def import_workspace(self, fs, source_deployment_dir, owner):
+    try:
+      fs.copy_remote_dir(source_deployment_dir, self.deployment_dir, owner=owner)
+    except WebHdfsException, e:
+      msg = _('The copy of the deployment directory failed: %s.') % e
+      LOG.error(msg)
+      raise PopupException(msg)
+
+
+class WorkflowConfiguration(object):
+
+  APP_NAME = 'oozie-workflow'
+
   SLA_DEFAULT = [
-      {'key': 'enabled', 'value': False}, # Always first element
+      {'key': 'enabled', 'value': False},  # Always first element
       {'key': 'nominal-time', 'value': '${nominal_time}'},
       {'key': 'should-start', 'value': ''},
       {'key': 'should-end', 'value': '${30 * MINUTES}'},
@@ -99,16 +126,111 @@ class Workflow(Job):
       {'key': 'notification-msg', 'value': ''},
       {'key': 'upstream-apps', 'value': ''},
   ]
+
+  PROPERTIES = [
+    {
+      "multiple": True,
+      "defaultValue": [
+        {
+          'name': 'oozie.use.system.libpath',
+          'value': True
+        }
+      ],
+      "value": [
+        {
+          'name': 'oozie.use.system.libpath',
+          'value': True
+        }
+      ],
+      "nice_name": _("Variables"),
+      "key": "parameters",
+      "help_text": _("Add one or more Oozie workflow job parameters."),
+      "type": "parameters"
+    }, {
+      "multiple": False,
+      "defaultValue": '',
+      "value": '',
+      "nice_name": _("Workspace"),
+      "key": "deployment_dir",
+      "help_text": _("Specify the deployment directory."),
+      "type": "hdfs-file"
+    }, {
+      "multiple": True,
+      "defaultValue": [],
+      "value": [],
+      "nice_name": _("Hadoop Properties"),
+      "key": "properties",
+      "help_text": _("Hadoop configuration properties."),
+      "type": "settings"
+    }, {
+      "multiple": False,
+      "defaultValue": True,
+      "value": True,
+      "nice_name": _("Show graph arrows"),
+      "key": "show_arrows",
+      "help_text": _("Toggles display of graph arrows."),
+      "type": "boolean"
+    }, {
+      "multiple": False,
+      "defaultValue": "uri:oozie:workflow:0.5",
+      "value": "uri:oozie:workflow:0.5",
+      "nice_name": _("Version"),
+      "key": "schema_version",
+      "help_text": _("Oozie XML Schema Version"),
+      "type": "string",
+      "options": [
+        "uri:oozie:workflow:0.5",
+        "uri:oozie:workflow:0.4.5",
+        "uri:oozie:workflow:0.4",
+      ]
+    }, {
+      "multiple": False,
+      "defaultValue": '',
+      "value": '',
+      "nice_name": _("Job XML"),
+      "key": "job_xml",
+      "help_text": _("Oozie Job XML file"),
+      "type": "hdfs-file"
+    }, {
+      "multiple": False,
+      "defaultValue": False,
+      "value": False,
+      "nice_name": _("SLA Enabled"),
+      "key": "sla_enabled",
+      "help_text": _("SLA Enabled"),
+      "type": "boolean"
+    }, {
+      "multiple": False,
+      "defaultValue": SLA_DEFAULT,
+      "value": SLA_DEFAULT,
+      "nice_name": _("SLA Configuration"),
+      "key": "sla",
+      "help_text": _("Oozie SLA properties"),
+      "type": "settings",
+      "options": [prop['key'] for prop in SLA_DEFAULT]
+    }
+  ]
+
+
+class Workflow(Job):
+  XML_FILE_NAME = 'workflow.xml'
+  PROPERTY_APP_PATH = 'oozie.wf.application.path'
   HUE_ID = 'hue-id-w'
 
-  def __init__(self, data=None, document=None, workflow=None):
+  def __init__(self, data=None, document=None, workflow=None, user=None):
     self.document = document
+    self.user = user
 
     if document is not None:
       self.data = document.data
     elif data is not None:
       self.data = data
     else:
+      if not workflow:
+        workflow = self.get_default_workflow()
+
+      workflow['properties'] = self.get_workflow_properties_for_user(user, workflow)
+
       self.data = json.dumps({
           'layout': [{
               "size":12, "rows":[
@@ -119,27 +241,95 @@ class Workflow(Job):
               "drops":[ "temp"],
               "klass":"card card-home card-column span12"
           }],
-          'workflow': workflow if workflow is not None else {
-              "id": None,
-              "uuid": None,
-              "name": "My Workflow",
-              "properties": {
-                  "description": "",
-                  "job_xml": "",
-                  "sla_enabled": False,
-                  "schema_version": "uri:oozie:workflow:0.5",
-                  "properties": [],
-                  "sla": Workflow.SLA_DEFAULT,
-                  "show_arrows": True,
-                  "wf1_id": None
-              },
-              "nodes":[
-                  {"id":"3f107997-04cc-8733-60a9-a4bb62cebffc","name":"Start","type":"start-widget","properties":{},"children":[{'to': '33430f0f-ebfa-c3ec-f237-3e77efa03d0a'}]},
-                  {"id":"33430f0f-ebfa-c3ec-f237-3e77efa03d0a","name":"End","type":"end-widget","properties":{},"children":[]},
-                  {"id":"17c9c895-5a16-7443-bb81-f34b30b21548","name":"Kill","type":"kill-widget","properties":{'message': _('Action failed, error message[${wf:errorMessage(wf:lastErrorNode())}]')},"children":[]}
-              ]
-          }
+          'workflow': workflow
       })
+
+  @classmethod
+  def get_application_path_key(cls):
+    return 'oozie.wf.application.path'
+
+  @classmethod
+  def gen_workflow_data_from_xml(cls, user, oozie_workflow):
+    node_list = []
+    try:
+      node_list = generate_v2_graph_nodes(oozie_workflow.definition)
+    except MalformedWfDefException, e:
+      LOG.exception("Could not find any nodes in Workflow definition. Maybe it's malformed?")
+    except InvalidTagWithNamespaceException, e:
+      LOG.exception(
+        "Tag with namespace %(namespace)s is not valid. Please use one of the following namespaces: %(namespaces)s" % {
+          'namespace': e.namespace,
+          'namespaces': e.namespaces
+        })
+
+    _to_lowercase(node_list)
+    adj_list = _create_graph_adjaceny_list(node_list)
+
+    node_hierarchy = ['start']
+    _get_hierarchy_from_adj_list(adj_list, adj_list['start']['ok_to'], node_hierarchy)
+
+    _update_adj_list(adj_list)
+
+    wf_rows = _create_workflow_layout(node_hierarchy, adj_list)
+
+    data = {'layout': [{}], 'workflow': {}}
+    if wf_rows:
+      data['layout'][0]['rows'] = wf_rows
+
+    wf_nodes = []
+    _dig_nodes(node_hierarchy, adj_list, user, wf_nodes)
+    data['workflow']['nodes'] = wf_nodes
+    data['workflow']['id'] = '123'
+    data['workflow']['properties'] = cls.get_workflow_properties_for_user(user, workflow=None)
+    data['workflow']['properties'].update({
+      'deployment_dir': '/user/hue/oozie/workspaces/hue-oozie-1452553957.19'
+    })
+
+    return data
+
+  @classmethod
+  def get_default_workflow(cls):
+    return {
+      "id": None,
+      "uuid": None,
+      "name": "My Workflow",
+      "nodes": [
+        {"id": "3f107997-04cc-8733-60a9-a4bb62cebffc", "name": "Start", "type": "start-widget", "properties": {},
+         "children": [{'to': '33430f0f-ebfa-c3ec-f237-3e77efa03d0a'}]},
+        {"id": "33430f0f-ebfa-c3ec-f237-3e77efa03d0a", "name": "End", "type": "end-widget", "properties": {},
+         "children": []},
+        {"id": "17c9c895-5a16-7443-bb81-f34b30b21548", "name": "Kill", "type": "kill-widget",
+         "properties": {'message': _('Action failed, error message[${wf:errorMessage(wf:lastErrorNode())}]')},
+         "children": []}
+      ]
+    }
+
+  @classmethod
+  def get_workflow_properties_for_user(cls, user, workflow=None):
+    workflow = workflow if workflow is not None else {}
+    properties = workflow.get('properties', None)
+
+    if not properties:
+      config = None
+      properties = cls.get_properties()
+
+      if user is not None:
+        if USE_DEFAULT_CONFIGURATION.get():
+          config = DefaultConfiguration.objects.get_configuration_for_user(app=WorkflowConfiguration.APP_NAME, user=user)
+
+      if config is not None:
+        properties.update(config.properties_dict)
+
+      properties.update({
+        'wf1_id': None,
+        'description': ''
+      })
+
+    return properties
+
+  @staticmethod
+  def get_properties():
+    return dict((prop['key'], prop['value']) for prop in WorkflowConfiguration.PROPERTIES)
 
   @property
   def id(self):
@@ -149,70 +339,10 @@ class Workflow(Job):
   def uuid(self):
     return self.document.uuid
 
-  def get_json(self):
-    _data = self.get_data()
-
-    return json.dumps(_data)
-
-  def get_data(self):
-    _data = json.loads(self.data)
-
-    if self.document is not None:
-      _data['workflow']['id'] = self.document.id
-      _data['workflow']['dependencies'] = list(self.document.dependencies.values('uuid',))
-    else:
-      _data['workflow']['dependencies'] = []
-
-    if 'parameters' not in _data['workflow']['properties']:
-      _data['workflow']['properties']['parameters'] = [
-          {'name': 'oozie.use.system.libpath', 'value': True},
-      ]
-    if 'show_arrows' not in _data['workflow']['properties']:
-      _data['workflow']['properties']['show_arrows'] = True
-
-    for node in _data['workflow']['nodes']:
-      if 'credentials' in node['properties']: # If node is an Action
-        if 'retry_max' not in node['properties']: # When displaying a workflow
-          node['properties']['retry_max'] = []
-        if 'retry_interval' not in node['properties']:
-          node['properties']['retry_interval'] = []
-
-      # Backward compatibility
-      _upgrade_older_node(node)
-
-    return _data
-
-  def to_xml(self, mapping=None):
-    if mapping is None:
-      mapping = {}
-    tmpl = 'editor2/gen/workflow.xml.mako'
-
-    data = self.get_data()
-    nodes = [node for node in self.nodes if node.name != 'End'] + [node for node in self.nodes if node.name == 'End'] # End at the end
-    node_mapping = dict([(node.id, node) for node in nodes])
-
-    sub_wfs_ids = [node.data['properties']['workflow'] for node in nodes if node.data['type'] == 'subworkflow']
-    workflow_mapping = dict([(workflow.uuid, Workflow(document=workflow)) for workflow in Document2.objects.filter(uuid__in=sub_wfs_ids)])
-
-    xml = re.sub(re.compile('>\s*\n+', re.MULTILINE), '>\n', django_mako.render_to_string(tmpl, {
-              'wf': self,
-              'workflow': data['workflow'],
-              'nodes': nodes,
-              'mapping': mapping,
-              'node_mapping': node_mapping,
-              'workflow_mapping': workflow_mapping
-          }))
-    return force_unicode(xml.strip())
-
   @property
   def name(self):
     _data = self.get_data()
     return _data['workflow']['name']
-
-  def update_name(self, name):
-    _data = self.get_data()
-    _data['workflow']['name'] = name
-    self.data = json.dumps(_data)
 
   @property
   def deployment_dir(self):
@@ -223,15 +353,6 @@ class Workflow(Job):
   def parameters(self):
     _data = self.get_data()
     return _data['workflow']['properties']['parameters']
-
-  def override_subworkflow_id(self, sub_wf_action, workflow_id):
-    _data = self.get_data()
-
-    action = [_action for _action in _data['workflow']['nodes'] if _action['id'] == sub_wf_action.id]
-    if action:
-      action[0]['properties']['job_properties'].append({'name': Workflow.HUE_ID, 'value': workflow_id})
-
-    self.data = json.dumps(_data)
 
   @property
   def sla_enabled(self):
@@ -254,7 +375,7 @@ class Workflow(Job):
   @property
   def nodes(self):
     _data = self.get_data()
-    return [Node(node) for node in _data['workflow']['nodes']]
+    return [Node(node, self.user) for node in _data['workflow']['nodes']]
 
   def find_parameters(self):
     params = set()
@@ -271,28 +392,85 @@ class Workflow(Job):
 
     return dict([(param, '') for param in list(params)])
 
+  def get_json(self):
+    _data = self.get_data()
+
+    return json.dumps(_data)
+
+  def get_data(self):
+    _data = json.loads(self.data)
+
+    if self.document is not None:
+      _data['workflow']['id'] = self.document.id
+      _data['workflow']['dependencies'] = list(self.document.dependencies.values('uuid', ))
+    else:
+      _data['workflow']['dependencies'] = []
+
+    if 'parameters' not in _data['workflow']['properties']:
+      _data['workflow']['properties']['parameters'] = [
+        {'name': 'oozie.use.system.libpath', 'value': True},
+      ]
+    if 'show_arrows' not in _data['workflow']['properties']:
+      _data['workflow']['properties']['show_arrows'] = True
+
+    for node in _data['workflow']['nodes']:
+      if 'credentials' in node['properties']:  # If node is an Action
+        if 'retry_max' not in node['properties']:  # When displaying a workflow
+          node['properties']['retry_max'] = []
+        if 'retry_interval' not in node['properties']:
+          node['properties']['retry_interval'] = []
+
+      # Backward compatibility
+      _upgrade_older_node(node)
+
+    return _data
+
+  def to_xml(self, mapping=None):
+    if mapping is None:
+      mapping = {}
+    tmpl = 'editor2/gen/workflow.xml.mako'
+
+    data = self.get_data()
+    nodes = [node for node in self.nodes if node.name != 'End'] + [node for node in self.nodes if
+                                                                   node.name == 'End']  # End at the end
+    node_mapping = dict([(node.id, node) for node in nodes])
+    sub_wfs_ids = [node.data['properties']['workflow'] for node in nodes if node.data['type'] == 'subworkflow']
+    workflow_mapping = dict(
+      [(workflow.uuid, Workflow(document=workflow, user=self.user)) for workflow in Document2.objects.filter(uuid__in=sub_wfs_ids)])
+
+    xml = re.sub(re.compile('>\s*\n+', re.MULTILINE), '>\n', django_mako.render_to_string(tmpl, {
+      'wf': self,
+      'workflow': data['workflow'],
+      'nodes': nodes,
+      'mapping': mapping,
+      'node_mapping': node_mapping,
+      'workflow_mapping': workflow_mapping
+    }))
+    return force_unicode(xml.strip())
+
+  def get_absolute_url(self):
+    return reverse('oozie:edit_workflow') + '?workflow=%s' % self.id
+
+  def override_subworkflow_id(self, sub_wf_action, workflow_id):
+    _data = self.get_data()
+
+    action = [_action for _action in _data['workflow']['nodes'] if _action['id'] == sub_wf_action.id]
+    if action:
+      action[0]['properties']['job_properties'].append({'name': Workflow.HUE_ID, 'value': workflow_id})
+
+    self.data = json.dumps(_data)
+
+  def update_name(self, name):
+    _data = self.get_data()
+    _data['workflow']['name'] = name
+    self.data = json.dumps(_data)
+
   def set_workspace(self, user):
     _data = json.loads(self.data)
 
     _data['workflow']['properties']['deployment_dir'] = Job.get_workspace(user)
 
     self.data = json.dumps(_data)
-
-  def check_workspace(self, fs, user):
-    # Create optional default root workspace for the first submission
-    if REMOTE_SAMPLE_DIR.get() == REMOTE_SAMPLE_DIR.config.default_value:
-      create_directories(fs, [REMOTE_SAMPLE_DIR.get()])
-
-    Submission(user, self, fs, None, {})._create_dir(self.deployment_dir)
-    Submission(user, self, fs, None, {})._create_dir(Hdfs.join(self.deployment_dir, 'lib'))
-
-  def import_workspace(self, fs, source_deployment_dir, owner):
-    try:
-      fs.copy_remote_dir(source_deployment_dir, self.deployment_dir, owner=owner)
-    except WebHdfsException, e:
-      msg = _('The copy of the deployment directory failed: %s.') % e
-      LOG.error(msg)
-      raise PopupException(msg)
 
   def create_single_action_workflow_data(self, node_id):
     _data = json.loads(self.data)
@@ -341,114 +519,20 @@ class Workflow(Job):
       }
     })
 
-  def get_absolute_url(self):
-    return reverse('oozie:edit_workflow') + '?workflow=%s' % self.id
-
-  @classmethod
-  def get_application_path_key(cls):
-    return 'oozie.wf.application.path'
-
-  @classmethod
-  def gen_workflow_data_from_xml(cls, user, oozie_workflow):
-    node_list = []
-    try:
-      node_list = generate_v2_graph_nodes(oozie_workflow.definition)
-    except MalformedWfDefException, e:
-      LOG.exception("Could not find any nodes in Workflow definition. Maybe it's malformed?")
-    except InvalidTagWithNamespaceException, e:
-      LOG.exception("Tag with namespace %(namespace)s is not valid. Please use one of the following namespaces: %(namespaces)s" % {
-      'namespace': e.namespace,
-      'namespaces': e.namespaces
-    })
-
-    _to_lowercase(node_list)
-    adj_list = _create_graph_adjaceny_list(node_list)
-
-    node_hierarchy = ['start']
-    _get_hierarchy_from_adj_list(adj_list, adj_list['start']['ok_to'], node_hierarchy)
-
-    _update_adj_list(adj_list)
-
-    wf_rows = _create_workflow_layout(node_hierarchy, adj_list)
-    data = {'layout': [{}], 'workflow': {}}
-    if wf_rows:
-      data['layout'][0]['rows'] = wf_rows
-
-    wf_nodes = []
-    _dig_nodes(node_hierarchy, adj_list, user, wf_nodes)
-    data['workflow']['nodes'] = wf_nodes
-    data['workflow']['id'] = "123"
-    data['workflow']['properties'] = json.loads("""{
-      "job_xml": "",
-      "description": "",
-      "wf1_id": null,
-      "sla_enabled": false,
-      "deployment_dir": "/user/hue/oozie/workspaces/hue-oozie-1452553957.19",
-      "schema_version": "uri:oozie:workflow:0.5",
-      "sla": [
-        {
-          "key": "enabled",
-          "value": false
-        },
-        {
-          "key": "nominal-time",
-          "value": "${nominal_time}"
-        },
-        {
-          "key": "should-start",
-          "value": ""
-        },
-        {
-          "key": "should-end",
-          "value": "${30 * MINUTES}"
-        },
-        {
-          "key": "max-duration",
-          "value": ""
-        },
-        {
-          "key": "alert-events",
-          "value": ""
-        },
-        {
-          "key": "alert-contact",
-          "value": ""
-        },
-        {
-          "key": "notification-msg",
-          "value": ""
-        },
-        {
-          "key": "upstream-apps",
-          "value": ""
-        }
-      ],
-      "show_arrows": true,
-      "parameters": [
-        {
-          "name": "oozie.use.system.libpath",
-          "value": true
-        }
-      ],
-      "properties": []
-    }""")
-
-    return data
-
 
 # Updates node_list to lowercase names
 # To avoid case-sensitive failures
 def _to_lowercase(node_list):
   for node in node_list:
-    node['node_type'] = node['node_type'].lower()
-    node['name'] = node['name'].lower()
-    node['ok_to'] = node['ok_to'].lower()
-    if 'error_to' in node.keys():
-      node['error_to'] = node['error_to'].lower()
+    for key in node.keys():
+      if hasattr(node[key], 'lower'):
+        node[key] = node[key].lower()
 
 def _update_adj_list(adj_list):
   uuids = {}
   id = 1
+  first_kill_node_seen = False
+
   for node in adj_list.keys():
     adj_list[node]['id'] = id
 
@@ -462,7 +546,12 @@ def _update_adj_list(adj_list):
       adj_list[node]['node_type'] = 'subworkflow'
 
     if adj_list[node]['node_type'] == 'kill':
-      adj_list[node]['uuid'] = '17c9c895-5a16-7443-bb81-f34b30b21548'
+      # JS requires at least one of the kill nodes to have this Id
+      if not first_kill_node_seen:
+        adj_list[node]['uuid'] = '17c9c895-5a16-7443-bb81-f34b30b21548'
+        first_kill_node_seen = True
+      else:
+        adj_list[node]['uuid'] = str(uuid.uuid4())
     elif adj_list[node]['node_type'] == 'start':
       adj_list[node]['uuid'] = '3f107997-04cc-8733-60a9-a4bb62cebffc'
     elif adj_list[node]['node_type'] == 'end':
@@ -501,11 +590,8 @@ def _dig_nodes(nodes, adj_list, user, wf_nodes):
         properties['user'] = '%s@%s' % (node.get('ssh').get('user'), node.get('ssh').get('host'))
         properties['ssh_command'] = node.get('ssh').get('command')
       elif node['node_type'] == 'fs':
-        #TBD: all
-        properties['deletes'] = [{'value': f['name']} for f in json.loads(node.get('deletes'))]
-        properties['mkdirs'] = [{'value': f['name']} for f in json.loads(node.get('mkdirs'))]
-        properties['moves'] = json.loads(node.get('moves'))
-        properties['touchzs'] = [{'value': f['name']} for f in json.loads(node.get('touchzs'))]
+        fs_props = node.get('fs')
+        # TBD: gather props for different fs operations
       elif node['node_type'] == 'email':
         properties['to'] = node.get('email').get('to')
         properties['subject'] = node.get('email').get('subject')
@@ -523,10 +609,12 @@ def _dig_nodes(nodes, adj_list, user, wf_nodes):
         properties['sla'] = ''
 
       children = []
-      if node['node_type'] == 'fork':
+      if node['node_type'] in ('fork', 'decision'):
         for key in node.keys():
           if key.startswith('path'):
             children.append({'to': adj_list[node[key]]['uuid'], 'condition': '${ 1 gt 0 }'})
+        if node['node_type'] == 'decision':
+          children.append({'to': adj_list[node['default']]['uuid'], 'condition': '${ 1 gt 0 }'})
       else:
         if node.get('ok_to'):
           children.append({'to': adj_list[node['ok_to']]['uuid']})
@@ -551,8 +639,8 @@ def _create_workflow_layout(nodes, adj_list, size=12):
     if type(node) != list:
       wf_rows.append({"widgets":[{"size":size, "name": adj_list[node]['node_type'], "id":  adj_list[node]['uuid'], "widgetType": "%s-widget" % adj_list[node]['node_type'], "properties":{}, "offset":0, "isLoading":False, "klass":"card card-widget span%s" % size, "columns":[]}]})
     else:
-      if adj_list[node[0]]['node_type'] == 'fork':
-        wf_rows.append({"widgets":[{"size":size, "name": 'Fork', "id":  adj_list[node[0]]['uuid'], "widgetType": "%s-widget" % adj_list[node[0]]['node_type'], "properties":{}, "offset":0, "isLoading":False, "klass":"card card-widget span%s" % size, "columns":[]}]})
+      if adj_list[node[0]]['node_type'] in ('fork', 'decision'):
+        wf_rows.append({"widgets":[{"size":size, "name": adj_list[node[0]]['name'], "id":  adj_list[node[0]]['uuid'], "widgetType": "%s-widget" % adj_list[node[0]]['node_type'], "properties":{}, "offset":0, "isLoading":False, "klass":"card card-widget span%s" % size, "columns":[]}]})
 
         wf_rows.append({
           "id": str(uuid.uuid4()),
@@ -574,45 +662,54 @@ def _create_workflow_layout(nodes, adj_list, size=12):
              for col in [_create_workflow_layout(item, adj_list, size) for item in node[1]]
           ]
         })
-
-        wf_rows.append({"widgets":[{"size":size, "name": 'Join', "id":  adj_list[node[2]]['uuid'], "widgetType": "%s-widget" % adj_list[node[2]]['node_type'], "properties":{}, "offset":0, "isLoading":False, "klass":"card card-widget span%s" % size, "columns":[]}]})
+        if adj_list[node[0]]['node_type'] == 'fork':
+          wf_rows.append({"widgets":[{"size":size, "name": adj_list[node[2]]['name'], "id":  adj_list[node[2]]['uuid'], "widgetType": "%s-widget" % adj_list[node[2]]['node_type'], "properties":{}, "offset":0, "isLoading":False, "klass":"card card-widget span%s" % size, "columns":[]}]})
       else:
         wf_rows.append(_create_workflow_layout(node, adj_list, size))
   return wf_rows
 
-
 def _get_hierarchy_from_adj_list(adj_list, curr_node, node_hierarchy):
 
-  if adj_list[curr_node]['node_type'] == 'join':
+  _get_hierarchy_from_adj_list_helper(adj_list, curr_node, node_hierarchy)
+
+  # Add End and Kill nodes to node_hierarchy
+  for key in adj_list.keys():
+    if adj_list[key]['node_type'] == 'kill':
+      node_hierarchy.append([adj_list[key]['name']])
+  node_hierarchy.append([adj_list[key]['name'] for key in adj_list.keys() if adj_list[key]['node_type'] == 'end'])
+
+
+def _get_hierarchy_from_adj_list_helper(adj_list, curr_node, node_hierarchy):
+
+  if not curr_node or adj_list[curr_node]['node_type'] in ('join', 'end', 'kill'):
     return curr_node
 
-  elif adj_list[curr_node]['node_type'] == 'end':
-    kill_node_name = [k for (k, v) in adj_list.iteritems() if v['node_type'] == 'kill']
-    node_hierarchy.append(kill_node_name)
-    node_hierarchy.append([adj_list[curr_node]['name']])
-    return node_hierarchy
-
-  elif adj_list[curr_node]['node_type'] == 'fork':
-    fork_nodes = []
-    fork_nodes.append(curr_node)
+  elif adj_list[curr_node]['node_type'] in ('fork', 'decision'):
+    branch_nodes = []
+    branch_nodes.append(curr_node)
 
     join_node = None
     children = []
     for key in adj_list[curr_node].keys():
       if key.startswith('path'):
         child = []
-        join_node = _get_hierarchy_from_adj_list(adj_list, adj_list[curr_node][key], child)
-        children.append(child)
+        return_node = _get_hierarchy_from_adj_list_helper(adj_list, adj_list[curr_node][key], child)
+        join_node = return_node if not join_node else join_node
+        if child:
+          children.append(child)
 
-    fork_nodes.append(children)
-    fork_nodes.append(join_node)
+    branch_nodes.append(children)
+    if adj_list[curr_node]['node_type'] == 'fork':
+      branch_nodes.append(join_node)
+      node_hierarchy.append(branch_nodes)
+      return _get_hierarchy_from_adj_list_helper(adj_list, adj_list[join_node]['ok_to'], node_hierarchy)
 
-    node_hierarchy.append(fork_nodes)
-    return _get_hierarchy_from_adj_list(adj_list, adj_list[join_node]['ok_to'], node_hierarchy)
+    node_hierarchy.append(branch_nodes)
+    return join_node
 
   else:
     node_hierarchy.append(curr_node)
-    return _get_hierarchy_from_adj_list(adj_list, adj_list[curr_node]['ok_to'], node_hierarchy)
+    return _get_hierarchy_from_adj_list_helper(adj_list, adj_list[curr_node]['ok_to'], node_hierarchy)
 
 
 def _create_graph_adjaceny_list(nodes):
@@ -627,8 +724,9 @@ def _create_graph_adjaceny_list(nodes):
 
 
 class Node():
-  def __init__(self, data):
+  def __init__(self, data, user=None):
     self.data = data
+    self.user = user
 
     self._augment_data()
 
@@ -640,7 +738,7 @@ class Node():
     if workflow_mapping is None:
       workflow_mapping = {}
 
-    if self.data['type'] == 'hive2' and not self.data['properties']['jdbc_url']:
+    if self.data['type'] in ('hive2', 'hive-document') and not self.data['properties']['jdbc_url']:
       self.data['properties']['jdbc_url'] = _get_hiveserver2_url()
 
     if self.data['type'] == 'fork':
@@ -649,6 +747,15 @@ class Node():
         LOG.warn('Fork has some children links that do not exist, ignoring them: links %s, existing links %s, links %s, existing links %s' \
                  % (len(links), len(self.data['children']), links, self.data['children']))
         self.data['children'] = links
+
+    if self.data['type'] == JavaDocumentAction.TYPE:
+      notebook = Notebook(document=Document2.objects.get_by_uuid(user=self.user, uuid=self.data['properties']['uuid']))
+      properties = notebook.get_data()['snippets'][0]['properties']
+
+      self.data['properties']['main_class'] = properties['class']
+      self.data['properties']['app_jar'] = properties['app_jar'] # Not used here
+      self.data['properties']['files'] = [{'value': f['path']} for f in properties['files']]
+      self.data['properties']['arguments'] = [{'value': prop} for prop in properties['arguments']]
 
     data = {
       'node': self.data,
@@ -691,7 +798,7 @@ class Node():
     if 'archives' not in self.data['properties']:
       self.data['properties']['archives'] = []
     if 'sla' not in self.data['properties']:
-      self.data['properties']['sla'] = Workflow.SLA_DEFAULT
+      self.data['properties']['sla'] = WorkflowConfiguration.SLA_DEFAULT
     if 'retry_max' not in self.data['properties']:
       self.data['properties']['retry_max'] = []
     if 'retry_interval' not in self.data['properties']:
@@ -701,7 +808,11 @@ class Node():
     _upgrade_older_node(self.data)
 
   def get_template_name(self):
-    return 'editor2/gen/workflow-%s.xml.mako' % self.data['type']
+    node_type = self.data['type']
+    if self.data['type'] == JavaDocumentAction.TYPE:
+      node_type = JavaAction.TYPE
+
+    return 'editor2/gen/workflow-%s.xml.mako' % node_type
 
   def find_parameters(self):
     return find_parameters(self) + (find_parameters(self, ['sla']) if self.sla_enabled else [])
@@ -723,13 +834,16 @@ def _upgrade_older_node(node):
     node['properties']['content_type'] = 'text/plain'
     node['properties']['attachment'] = ''
 
+  if node['type'] == 'spark-widget' and 'files' not in node['properties']:
+    node['properties']['files'] = []
+
 
 class Action(object):
 
   @classmethod
   def get_fields(cls):
     credentials = [cls.DEFAULT_CREDENTIALS] if hasattr(cls, 'DEFAULT_CREDENTIALS') else []
-    return [(f['name'], f['value']) for f in cls.FIELDS.itervalues()] + [('sla', Workflow.SLA_DEFAULT), ('credentials', credentials)]
+    return [(f['name'], f['value']) for f in cls.FIELDS.itervalues()] + [('sla', WorkflowConfiguration.SLA_DEFAULT), ('credentials', credentials)]
 
 
 class StartNode(Action):
@@ -999,8 +1113,8 @@ class HiveAction(Action):
 
 def _get_hiveserver2_url():
   try:
-    from beeswax.conf import HIVE_SERVER_HOST, HIVE_SERVER_PORT
-    return 'jdbc:hive2://%s:%s/default' % (HIVE_SERVER_HOST.get(), HIVE_SERVER_PORT.get())
+    from beeswax.hive_site import hiveserver2_jdbc_url
+    return hiveserver2_jdbc_url()
   except Exception, e:
     # Might fail is Hive is disabled
     LOG.warn('Could not guess HiveServer2 URL: %s' % smart_str(e))
@@ -1715,6 +1829,13 @@ class SparkAction(Action):
           'help_text': _('The name of the spark application'),
           'type': ''
      },
+     'files': {
+          'name': 'files',
+          'label': _('Files'),
+          'value': [],
+          'help_text': _('Files put in the running directory.'),
+          'type': ''
+     },
     'class': {
           'name': 'class',
           'label': _('Main class'),
@@ -1780,7 +1901,7 @@ class SparkAction(Action):
 
   @classmethod
   def get_mandatory_fields(cls):
-    return [cls.FIELDS['spark_master'], cls.FIELDS['mode'], cls.FIELDS['jars'], cls.FIELDS['class']]
+    return [cls.FIELDS['spark_master'], cls.FIELDS['mode'], cls.FIELDS['jars']]
 
 
 class KillAction(Action):
@@ -1835,6 +1956,188 @@ class ForkNode(Action):
     return []
 
 
+class HiveDocumentAction(Action):
+  TYPE = 'hive-document'
+  DEFAULT_CREDENTIALS = 'hive2'
+  FIELDS = {
+     'uuid': {
+          'name': 'uuid',
+          'label': _('Hive query'),
+          'value': '',
+          'help_text': _('Select a saved Hive query you want to schedule.'),
+          'type': 'hive'
+     },
+     'parameters': {
+          'name': 'parameters',
+          'label': _('Parameters'),
+          'value': [],
+          'help_text': _('The %(type)s parameters of the script. E.g. N=5, INPUT=${inputDir}')  % {'type': TYPE.title()},
+          'type': ''
+     },
+     # Common
+     'jdbc_url': {
+          'name': 'jdbc_url',
+          'label': _('HiveServer2 URL'),
+          'value': "",
+          'help_text': _('e.g. jdbc:hive2://localhost:10000/default. JDBC URL for the Hive Server 2.'),
+          'type': ''
+     },
+     'password': {
+          'name': 'password',
+          'label': _('Password'),
+          'value': '',
+          'help_text': _('The password element must contain the password of the current user. However, the password is only used if Hive Server 2 is backed by '
+                         'something requiring a password (e.g. LDAP); non-secured Hive Server 2 or Kerberized Hive Server 2 don\'t require a password.'),
+          'type': ''
+     },
+     'files': {
+          'name': 'files',
+          'label': _('Files'),
+          'value': [],
+          'help_text': _('Files put in the running directory.'),
+          'type': ''
+     },
+     'archives': {
+          'name': 'archives',
+          'label': _('Archives'),
+          'value': [],
+          'help_text': _('zip, tar and tgz/tar.gz uncompressed into the running directory.'),
+          'type': ''
+     },
+     'job_properties': {
+          'name': 'job_properties',
+          'label': _('Hadoop job properties'),
+          'value': [],
+          'help_text': _('value, e.g. production'),
+          'type': ''
+     },
+     'prepares': {
+          'name': 'prepares',
+          'label': _('Prepares'),
+          'value': [],
+          'help_text': _('Path to manipulate before starting the application.'),
+          'type': ''
+     },
+     'job_xml': {
+          'name': 'job_xml',
+          'label': _('Job XML'),
+          'value': '',
+          'help_text': _('Refer to a Hadoop JobConf job.xml'),
+          'type': ''
+     },
+     'retry_max': {
+          'name': 'retry_max',
+          'label': _('Max retry'),
+          'value': [],
+          'help_text': _('Number of times, default is 3'),
+          'type': ''
+     },
+     'retry_interval': {
+          'name': 'retry_interval',
+          'label': _('Retry interval'),
+          'value': [],
+          'help_text': _('Wait time in minutes, default is 10'),
+          'type': ''
+     }
+  }
+
+  @classmethod
+  def get_mandatory_fields(cls):
+    return [cls.FIELDS['uuid']]
+
+
+class JavaDocumentAction(Action):
+  TYPE = 'java-document'
+  FIELDS = {
+     'uuid': {
+          'name': 'uuid',
+          'label': _('Java program'),
+          'value': '',
+          'help_text': _('Select a saved Java program you want to schedule.'),
+          'type': 'java'
+     },
+     'arguments': {
+          'name': 'arguments',
+          'label': _('Arguments'),
+          'value': [],
+          'help_text': _('Arguments of the main method. The value of each arg element is considered a single argument '
+                         'and they are passed to the main method in the same order.'),
+          'type': ''
+     },
+     'java_opts': {
+          'name': 'java_opts',
+          'label': _('Java options'),
+          'value': [],
+          'help_text': _('Parameters for the JVM, e.g. -Dprop1=a -Dprop2=b'),
+          'type': ''
+     },
+     'capture_output': {
+          'name': 'capture_output',
+          'label': _('Capture output'),
+          'value': False,
+          'help_text': _('Capture output of the stdout of the %(program)s command execution. The %(program)s '
+                         'command output must be in Java Properties file format and it must not exceed 2KB. '
+                         'From within the workflow definition, the output of an %(program)s action node is accessible '
+                         'via the String action:output(String node, String key) function') % {'program': TYPE.title()},
+          'type': ''
+     },
+     # Common
+     'files': {
+          'name': 'files',
+          'label': _('Files'),
+          'value': [],
+          'help_text': _('Files put in the running directory.'),
+          'type': ''
+     },
+     'archives': {
+          'name': 'archives',
+          'label': _('Archives'),
+          'value': [],
+          'help_text': _('zip, tar and tgz/tar.gz uncompressed into the running directory.'),
+          'type': ''
+     },
+     'job_properties': {
+          'name': 'job_properties',
+          'label': _('Hadoop job properties'),
+          'value': [],
+          'help_text': _('value, e.g. production'),
+          'type': ''
+     },
+     'prepares': {
+          'name': 'prepares',
+          'label': _('Prepares'),
+          'value': [],
+          'help_text': _('Path to manipulate before starting the application.'),
+          'type': ''
+     },
+     'job_xml': {
+          'name': 'job_xml',
+          'label': _('Job XML'),
+          'value': [],
+          'help_text': _('Refer to a Hadoop JobConf job.xml'),
+          'type': ''
+     },
+     'retry_max': {
+          'name': 'retry_max',
+          'label': _('Max retry'),
+          'value': [],
+          'help_text': _('Number of times, default is 3'),
+          'type': ''
+     },
+     'retry_interval': {
+          'name': 'retry_interval',
+          'label': _('Retry interval'),
+          'value': [],
+          'help_text': _('Wait time in minutes, default is 10'),
+          'type': ''
+     }
+  }
+
+  @classmethod
+  def get_mandatory_fields(cls):
+    return [cls.FIELDS['uuid']]
+
+
 class DecisionNode(Action):
   TYPE = 'decision'
   FIELDS = {}
@@ -1865,7 +2168,9 @@ NODES = {
   'fork-widget': ForkNode,
   'decision-widget': DecisionNode,
   'spark-widget': SparkAction,
-  'generic-widget': GenericAction
+  'generic-widget': GenericAction,
+  'hive-document-widget': HiveDocumentAction,
+  'java-document-widget': JavaDocumentAction
 }
 
 
@@ -1915,7 +2220,7 @@ def find_dollar_variables(text):
 def find_dollar_braced_variables(text):
   vars = set()
 
-  for var in re.findall('\$\{(.+)\}', text, re.MULTILINE):
+  for var in re.findall('\$\{([A-Za-z0-9:_-]+)\}', text, re.MULTILINE):
     if ':' in var:
       var = var.split(':', 1)[1]
     vars.add(var)
@@ -2212,7 +2517,7 @@ class Coordinator(Job):
                   {'name': 'start_date', 'value':  datetime.today().strftime('%Y-%m-%dT%H:%M')},
                   {'name': 'end_date', 'value': (datetime.today() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')}
               ],
-              'sla': Workflow.SLA_DEFAULT
+              'sla': WorkflowConfiguration.SLA_DEFAULT
           }
       }
 
@@ -2369,7 +2674,9 @@ class Coordinator(Job):
 
   @property
   def workflow(self):
-    wf_doc = Document2.objects.get_by_uuid(uuid=self.data['properties']['workflow'])
+    if self.document is None:
+      raise PopupException(_('Cannot return workflow since document attribute is None.'))
+    wf_doc = Document2.objects.get_by_uuid(user=self.document.owner, uuid=self.data['properties']['workflow'])
     return Workflow(document=wf_doc)
 
   def get_absolute_url(self):
@@ -2606,3 +2913,228 @@ class History(object):
       return Bundle(document=doc)
     except Document2.DoesNotExist:
       pass
+
+
+def _import_workspace(fs, user, job):
+  source_workspace_dir = job.deployment_dir
+
+  job.set_workspace(user)
+  job.check_workspace(fs, user)
+  job.import_workspace(fs, source_workspace_dir, user)
+
+
+def _save_workflow(workflow, layout, user, fs=None):
+  if workflow.get('id'):
+    workflow_doc = Document2.objects.get(id=workflow['id'])
+  else:
+    workflow_doc = Document2.objects.create(name=workflow['name'], uuid=workflow['uuid'], type='oozie-workflow2', owner=user, description=workflow['properties']['description'])
+    Document.objects.link(workflow_doc, owner=workflow_doc.owner, name=workflow_doc.name, description=workflow_doc.description, extra='workflow2')
+
+  # Excludes all the sub-workflow and Hive dependencies. Contains list of history and coordinator dependencies.
+  workflow_doc.dependencies = workflow_doc.dependencies.exclude(Q(is_history=False) & Q(type__in=['oozie-workflow2', 'query-hive', 'query-java']))
+
+  dependencies = \
+      [node['properties']['workflow'] for node in workflow['nodes'] if node['type'] == 'subworkflow-widget'] + \
+      [node['properties']['uuid'] for node in workflow['nodes'] if 'document-widget' in node['type']]
+  if dependencies:
+    dependency_docs = Document2.objects.filter(uuid__in=dependencies)
+    workflow_doc.dependencies.add(*dependency_docs)
+
+  if workflow['properties'].get('imported'): # We convert from and old workflow format (3.8 <) to the latest
+    workflow['properties']['imported'] = False
+    workflow_instance = Workflow(workflow=workflow, user=user)
+    _import_workspace(fs, user, workflow_instance)
+    workflow['properties']['deployment_dir'] = workflow_instance.deployment_dir
+
+  workflow_doc.update_data({'workflow': workflow})
+  workflow_doc.update_data({'layout': layout})
+  workflow_doc1 = workflow_doc.doc.get()
+  workflow_doc.name = workflow_doc1.name = workflow['name']
+  workflow_doc.description = workflow_doc1.description = workflow['properties']['description']
+  workflow_doc.save()
+  workflow_doc1.save()
+
+  return workflow_doc
+
+
+class WorkflowBuilder():
+  """
+  Building a workflow that has saved Documents for nodes (e.g Saved Hive query, saved Pig script...).
+  """
+
+  def create_workflow(self, user, document=None, documents=None, name=None, managed=False):
+    nodes = []
+    if documents is None:
+      documents = [document]
+
+    if name is None:
+      name = _('Schedule of ') + ','.join([document.name or document.type for document in documents])
+
+    for document in documents:
+      if document.type == 'query-java':
+        node = self.get_java_document_node(document, name)
+      else:
+        node = self.get_hive_document_node(document, name, user)
+
+      nodes.append(node)
+
+    workflow_doc = self.get_workflow(nodes, name, document.uuid, user, managed=managed)
+    workflow_doc.dependencies.add(*documents)
+
+    return workflow_doc
+
+
+  def get_hive_document_node(self, document, name, user):
+    api = get_oozie(user)
+
+    credentials = [HiveDocumentAction.DEFAULT_CREDENTIALS] if api.security_enabled else []
+
+    notebook = Notebook(document=document)
+    parameters = find_dollar_braced_variables(notebook.get_str())
+    parameters = [{u'value': u'%s=${%s}' % (p, p)} for p in parameters]
+
+    return {
+        u'name': u'doc-hive-%s' % document.uuid[:4],
+        u'id': str(uuid.uuid4()),
+        u'type': u'hive-document-widget',
+        u'properties': {
+            u'files': [],
+            u'job_xml': u'',
+            u'uuid': document.uuid,
+            u'parameters': parameters,
+            u'retry_interval': [],
+            u'retry_max': [],
+            u'job_properties': [],
+            u'sla': [
+                {u'key': u'enabled', u'value': False},
+                {u'key': u'nominal-time', u'value': u'${nominal_time}'},
+                {u'key': u'should-start', u'value': u''},
+                {u'key': u'should-end', u'value': u'${30 * MINUTES}'},
+                {u'key': u'max-duration', u'value': u''},
+                {u'key': u'alert-events', u'value': u''},
+                {u'key': u'alert-contact', u'value': u''},
+                {u'key': u'notification-msg', u'value': u''},
+                {u'key': u'upstream-apps', u'value': u''},
+            ],
+            u'archives': [],
+            u'prepares': [],
+            u'credentials': credentials,
+            u'password': u'',
+            u'jdbc_url': u'',
+        },
+        u'children': [
+            {u'to': u'33430f0f-ebfa-c3ec-f237-3e77efa03d0a'},
+            {u'error': u'17c9c895-5a16-7443-bb81-f34b30b21548'
+        }],
+        u'actionParameters': [],
+    }
+
+  def get_java_document_node(self, document, name):
+    credentials = []
+
+    return {
+        "id": str(uuid.uuid4()),
+        'name': u'doc-hive-%s' % document.uuid[:4],
+        "type":"java-document-widget",
+        "properties":{
+              u'uuid': document.uuid, # Files, main_class, arguments comes from there
+              "job_xml":[],
+              "jar_path": "",
+              "java_opts":[],
+              "retry_max":[],
+              "retry_interval":[],
+              "job_properties":[],
+              "capture_output": False,
+              "prepares":[],
+              "credentials": credentials,
+              "sla":[{"value":False, "key":"enabled"}, {"value":"${nominal_time}", "key":"nominal-time"}, {"value":"", "key":"should-start"}, {"value":"${30 * MINUTES}", "key":"should-end"}, {"value":"", "key":"max-duration"}, {"value":"", "key":"alert-events"}, {"value":"", "key":"alert-contact"}, {"value":"", "key":"notification-msg"}, {"value":"", "key":"upstream-apps"}],
+              "archives":[]
+        },
+        "children":[
+            {"to":"33430f0f-ebfa-c3ec-f237-3e77efa03d0a"},
+            {"error":"17c9c895-5a16-7443-bb81-f34b30b21548"}
+        ],
+        "actionParameters":[],
+        "actionParametersFetched": False
+    }
+
+
+
+  def get_workflow(self, nodes, name, doc_uuid, user, managed=False):
+    parameters = []
+
+    data = {
+      'workflow': {
+      u'name': name,
+      u'nodes': [{
+          u'name': u'Start',
+          u'properties': {},
+          u'actionParametersFetched': False,
+          u'id': u'3f107997-04cc-8733-60a9-a4bb62cebffc',
+          u'type': u'start-widget',
+          u'children': [{u'to': u'33430f0f-ebfa-c3ec-f237-3e77efa03d0a'}],
+          u'actionParameters': [],
+        }, {
+          u'name': u'End',
+          u'properties': {},
+          u'actionParametersFetched': False,
+          u'id': u'33430f0f-ebfa-c3ec-f237-3e77efa03d0a',
+          u'type': u'end-widget',
+          u'children': [],
+          u'actionParameters': [],
+        }, {
+          u'name': u'Kill',
+          u'properties': {
+              u'body': u'',
+              u'cc': u'',
+              u'to': u'',
+              u'enableMail': False,
+              u'message': u'Action failed, error message[${wf:errorMessage(wf:lastErrorNode())}]',
+              u'subject': u'',
+              },
+          u'actionParametersFetched': False,
+          u'id': u'17c9c895-5a16-7443-bb81-f34b30b21548',
+          u'type': u'kill-widget',
+          u'children': [],
+          u'actionParameters': [],
+        }
+      ],
+      u'properties': {
+          u'job_xml': u'',
+          u'description': u'',
+          u'wf1_id': None,
+          u'sla_enabled': False,
+          u'deployment_dir': Job.get_workspace(user),
+          u'schema_version': u'uri:oozie:workflow:0.5',
+          u'sla': [
+              {u'key': u'enabled', u'value': False},
+              {u'key': u'nominal-time', u'value': u'${nominal_time}'},
+              {u'key': u'should-start', u'value': u''},
+              {u'key': u'should-end', u'value': u'${30 * MINUTES}'},
+              {u'key': u'max-duration', u'value': u''},
+              {u'key': u'alert-events', u'value': u''},
+              {u'key': u'alert-contact', u'value': u''},
+              {u'key': u'notification-msg', u'value': u''},
+              {u'key': u'upstream-apps', u'value': u''},
+              ],
+          u'show_arrows': True,
+          u'parameters': parameters,
+          u'properties': [],
+          },
+      u'uuid': str(uuid.uuid4()),
+      }
+    }
+
+    _prev_node = data['workflow']['nodes'][0]
+
+    for node in nodes:
+      data['workflow']['nodes'].append(node)
+
+      _prev_node['children'][0]['to'] = node['id'] # We link nodes
+      _prev_node = node
+
+    workflow_doc = _save_workflow(data['workflow'], {}, user)
+    workflow_doc.is_managed = managed
+    workflow_doc.save()
+
+    return workflow_doc

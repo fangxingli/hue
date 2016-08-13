@@ -15,6 +15,7 @@
 ## limitations under the License.
 
 <%!
+from aws.conf import is_enabled as is_s3_enabled
 from desktop import conf
 from desktop.lib.i18n import smart_unicode
 from django.utils.translation import ugettext as _
@@ -54,11 +55,10 @@ if USE_NEW_EDITOR.get():
   <meta name="description" content="">
   <meta name="author" content="">
 
+  <link href="${ static('desktop/css/roboto.css') }" rel="stylesheet">
   <link href="${ static('desktop/ext/css/bootplus.css') }" rel="stylesheet">
   <link href="${ static('desktop/ext/css/font-awesome.min.css') }" rel="stylesheet">
   <link href="${ static('desktop/css/hue3.css') }" rel="stylesheet">
-  <link href="${ static('desktop/ext/css/fileuploader.css') }" rel="stylesheet">
-  <link href="${ static('desktop/css/perfect-scrollbar.min.css') }" rel="stylesheet">
 
   <style type="text/css">
     % if conf.CUSTOM.BANNER_TOP_HTML.get():
@@ -108,6 +108,8 @@ if USE_NEW_EDITOR.get():
 
   <script type="text/javascript" charset="utf-8">
 
+    var LOGGED_USERNAME = '${ user.username }';
+
     // jHue plugins global configuration
     jHueFileChooserGlobals = {
       labels: {
@@ -134,7 +136,9 @@ if USE_NEW_EDITOR.get():
     jHueTableExtenderGlobals = {
       labels: {
         GO_TO_COLUMN: "${_('Go to column:')}",
-        PLACEHOLDER: "${_('column name...')}"
+        PLACEHOLDER: "${_('column name...')}",
+        LOCK: "${_('Click to lock this row')}",
+        UNLOCK: "${_('Click to unlock this row')}"
       }
     };
 
@@ -186,6 +190,7 @@ if USE_NEW_EDITOR.get():
   <script src="${ static('desktop/js/jquery.rowselector.js') }"></script>
   <script src="${ static('desktop/js/jquery.notify.js') }"></script>
   <script src="${ static('desktop/js/jquery.titleupdater.js') }"></script>
+  <script src="${ static('desktop/js/jquery.horizontalscrollbar.js') }"></script>
   <script src="${ static('desktop/js/jquery.tablescroller.js') }"></script>
   <script src="${ static('desktop/js/jquery.tableextender.js') }"></script>
   <script src="${ static('desktop/js/jquery.scrollup.js') }"></script>
@@ -194,15 +199,28 @@ if USE_NEW_EDITOR.get():
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery.total-storage.min.js') }"></script>
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery.placeholder.min.js') }"></script>
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery.dataTables.1.8.2.min.js') }"></script>
-  <script src="${ static('desktop/js/perfect-scrollbar.jquery.min.js') }"></script>
-  <script src="${ static('desktop/ext/js/jquery/plugins/floatlabels.min.js') }"></script>
+  <script src="${ static('desktop/js/jquery.nicescroll.js') }"></script>
   <script src="${ static('desktop/js/jquery.datatables.sorting.js') }"></script>
   <script src="${ static('desktop/ext/js/bootstrap.min.js') }"></script>
   <script src="${ static('desktop/ext/js/bootstrap-better-typeahead.min.js') }"></script>
   <script src="${ static('desktop/ext/js/fileuploader.js') }"></script>
+  <script src="${ static('desktop/ext/js/filesize.min.js') }"></script>
   <script src="${ static('desktop/js/popover-extra-placements.js') }"></script>
+  <script src="${ static('desktop/ext/js/moment-with-locales.min.js') }" type="text/javascript" charset="utf-8"></script>
 
   <script type="text/javascript" charset="utf-8">
+
+    moment.locale(window.navigator.userLanguage || window.navigator.language);
+    localeFormat = function (time) {
+      var mTime = time;
+      if (typeof ko !== 'undefined' && ko.isObservable(time)) {
+        mTime = time();
+      }
+      if (moment(mTime).isValid()) {
+        return moment.utc(mTime).format("L LT");
+      }
+      return mTime;
+    }
 
     //Add CSRF Token to all XHR Requests
     var xrhsend = XMLHttpRequest.prototype.send;
@@ -213,8 +231,10 @@ if USE_NEW_EDITOR.get():
 
     $.fn.dataTableExt.sErrMode = "throw";
 
-    // sets global assistHelper TTL
+    // sets global apiHelper TTL
     $.totalStorage('hue.cacheable.ttl', ${conf.CUSTOM.CACHEABLE_TTL.get()});
+
+    var IDLE_SESSION_TIMEOUT = -1;
 
     $(document).ready(function () {
       // forces IE's ajax calls not to cache
@@ -232,6 +252,23 @@ if USE_NEW_EDITOR.get():
       else {
         top.location = self.location;
       }
+
+      %if conf.AUTH.IDLE_SESSION_TIMEOUT.get() > -1 and not skip_idle_timeout:
+      IDLE_SESSION_TIMEOUT = ${conf.AUTH.IDLE_SESSION_TIMEOUT.get()};
+      var idleTimer;
+      function resetIdleTimer() {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(function () {
+          // Check if logged out
+          $.get('/desktop/debug/is_idle');
+        }, (IDLE_SESSION_TIMEOUT * 1000) + 1000);
+      }
+
+      $(document).on('mousemove', resetIdleTimer);
+      $(document).on('keydown', resetIdleTimer);
+      $(document).on('click', resetIdleTimer);
+      resetIdleTimer();
+      %endif
 
       $("input, textarea").placeholder();
       $(".submitter").keydown(function (e) {
@@ -262,20 +299,27 @@ if USE_NEW_EDITOR.get():
       var checkJobBrowserStatusIdx = window.setTimeout(checkJobBrowserStatus, 10);
 
       function checkJobBrowserStatus(){
-        $.getJSON("/${apps['jobbrowser'].display_name}/?format=json&state=running&user=${user.username}", function(data){
-          if (data != null && data.jobs != null){
-            if (data.jobs.length > 0){
-              $("#jobBrowserCount").removeClass("hide").text(data.jobs.length);
+        $.post("/jobbrowser/jobs/", {
+            "format": "json",
+            "state": "running",
+            "user": "${user.username}"
+          },
+          function(data) {
+            if (data != null && data.jobs != null) {
+              huePubSub.publish('jobbrowser.data', data.jobs);
+              if (data.jobs.length > 0){
+                $("#jobBrowserCount").removeClass("hide").text(data.jobs.length);
+              }
+              else {
+                $("#jobBrowserCount").addClass("hide");
+              }
             }
-            else {
-              $("#jobBrowserCount").addClass("hide");
-            }
-          }
           checkJobBrowserStatusIdx = window.setTimeout(checkJobBrowserStatus, JB_CHECK_INTERVAL_IN_MILLIS);
         }).fail(function () {
           window.clearTimeout(checkJobBrowserStatusIdx);
         });
       }
+      huePubSub.subscribe('check.job.browser', checkJobBrowserStatus);
       % endif
 
       function openDropdown(which, timeout){
@@ -380,13 +424,55 @@ if USE_NEW_EDITOR.get():
   <ul class="nav nav-pills">
     <li class="divider-vertical"></li>
     % if 'filebrowser' in apps:
-    <li><a title="${_('Manage HDFS')}" rel="navigator-tooltip" href="/${apps['filebrowser'].display_name}"><i class="fa fa-file"></i><span class="hideable">&nbsp;${_('File Browser')}&nbsp;</span></a></li>
+      % if not is_s3_enabled():
+      <li class="hide1380">
+        <a title="${_('Manage HDFS')}" rel="navigator-tooltip" href="/${apps['filebrowser'].display_name}">
+          <i class="fa fa-file"></i>&nbsp;${_('File Browser')}&nbsp;
+        </a>
+      </li>
+      % else:
+        <li class="dropdown hide1380">
+          <a title="${_('File Browsers')}" rel="navigator-tooltip" href="#" data-toggle="dropdown" class="dropdown-toggle">
+            <i class="fa fa-file"></i>&nbsp;${_('File Browsers')} <b class="caret"></b>
+          </a>
+          <ul role="menu" class="dropdown-menu">
+            <li><a href="/${apps['filebrowser'].display_name}">
+              <i class="fa fa-fw fa-file" style="vertical-align: middle"></i>${_('HDFS Browser')}</a>
+            </li>
+            <li><a href="/${apps['filebrowser'].display_name}/view=S3://">
+              <i class="fa fa-fw fa-cloud" style="vertical-align: middle"></i>${_('S3 Browser')}</a>
+            </li>
+          </ul>
+        </li>
+      % endif
+      <li class="hideMoreThan1380">
+        <a title="${_('HDFS Browser')}" rel="navigator-tooltip" href="/${apps['filebrowser'].display_name}">
+          <i class="fa fa-file"></i>
+        </a>
+      </li>
+      <li class="hideMoreThan1380">
+        % if is_s3_enabled():
+          <a title="${_('S3 Browser')}" rel="navigator-tooltip" href="/${apps['filebrowser'].display_name}/view=S3://">
+            <i class="fa fa-cloud"></i>
+          </a>
+        % endif
+      </li>
     % endif
     % if 'jobbrowser' in apps:
-    <li><a title="${_('Manage jobs')}" rel="navigator-tooltip" href="/${apps['jobbrowser'].display_name}"><i class="fa fa-list-alt"></i><span class="hideable">&nbsp;${_('Job Browser')}&nbsp;</span><span id="jobBrowserCount" class="badge badge-warning hide" style="padding-top:0;padding-bottom: 0"></span></a></li>
+    <li class="hide1380"><a title="${_('Manage jobs')}" rel="navigator-tooltip" href="/${apps['jobbrowser'].display_name}"><i class="fa fa-list-alt"></i>&nbsp;${_('Job Browser')}&nbsp;<span id="jobBrowserCount" class="badge badge-warning hide" style="padding-top:0;padding-bottom: 0"></span></a></li>
+    <li class="hideMoreThan1380"><a title="${_('Job Browser')}" rel="navigator-tooltip" href="/${apps['jobbrowser'].display_name}"><i class="fa fa-list-alt"></i></a></li>
     % endif
+    <%
+      view_profile = user.has_hue_permission(action="access_view:useradmin:edit_user", app="useradmin") or user.is_superuser
+    %>
     <li class="dropdown">
-      <a title="${ _('Administration') }" rel="navigator-tooltip" href="index.html#" data-toggle="dropdown" class="dropdown-toggle"><i class="fa fa-cogs"></i>&nbsp;<span class="hideable">${user.username}&nbsp;</span><b class="caret"></b></a>
+      <a title="${ _('Administration') if view_profile else '' }" href="index.html#" rel="navigator-tooltip" data-toggle="dropdown" class="dropdown-toggle">
+        <i class="fa fa-cogs"></i>&nbsp;<span class="hideable">${user.username}&nbsp;</span>
+        % if view_profile:
+          <b class="caret"></b>
+        % endif
+      </a>
+      % if view_profile:
       <ul class="dropdown-menu pull-right">
         <li>
           <a href="${ url('useradmin.views.edit_user', username=user.username) }"><i class="fa fa-key"></i>&nbsp;&nbsp;
@@ -401,6 +487,7 @@ if USE_NEW_EDITOR.get():
           <li><a href="${ url('useradmin.views.list_users') }"><i class="fa fa-group"></i>&nbsp;&nbsp;${_('Manage Users')}</a></li>
         % endif
       </ul>
+    % endif
     </li>
     % if 'help' in apps:
     <li><a title="${_('Documentation')}" rel="navigator-tooltip" href="/help"><i class="fa fa-question-circle"></i></a></li>
@@ -427,9 +514,6 @@ if USE_NEW_EDITOR.get():
          <a title="${_('Query data')}" rel="navigator-tooltip" href="#" data-toggle="dropdown" class="dropdown-toggle">Query Editors <b class="caret"></b></a>
          <ul role="menu" class="dropdown-menu">
            % if 'beeswax' in apps:
-             <%
-               from desktop.conf import USE_NEW_EDITOR
-             %>
              % if USE_NEW_EDITOR.get():
              <li><a href="${ url('notebook:editor') }?type=hive"><img src="${ static(apps['beeswax'].icon_path) }" class="app-icon"/> ${_('Hive')}</a></li>
              % else:
@@ -467,9 +551,9 @@ if USE_NEW_EDITOR.get():
        % endif
        % if 'beeswax' in apps:
         <%
-          from desktop.conf import USE_NEW_EDITOR
+          from notebook.conf import SHOW_NOTEBOOKS
         %>
-        % if USE_NEW_EDITOR.get():
+        % if SHOW_NOTEBOOKS.get():
          <% from desktop.models import Document2, Document %>
          <% notebooks = [d.content_object.to_dict() for d in Document.objects.get_docs(user, Document2, extra='notebook') if not d.content_object.is_history] %>
          % if not notebooks:
@@ -533,6 +617,7 @@ if USE_NEW_EDITOR.get():
                <li><a href="${url('oozie:list_oozie_bundles')}"><img src="${ static('oozie/art/icon_oozie_bundle_48.png') }" class="app-icon" /> ${_('Bundles')}</a></li>
              </ul>
            </li>
+           % if not user.has_hue_permission(action="disable_editor_access", app="oozie") or user.is_superuser:
            <% from oozie.conf import ENABLE_V2 %>
            % if not ENABLE_V2.get():
            <li class="dropdown-submenu">
@@ -552,6 +637,7 @@ if USE_NEW_EDITOR.get():
                <li><a href="${url('oozie:list_editor_bundles')}"><img src="${ static('oozie/art/icon_oozie_bundle_48.png') }" class="app-icon" /> ${_('Bundles')}</a></li>
              </ul>
            </li>
+           % endif
            % endif
          </ul>
        </li>
@@ -597,10 +683,10 @@ if USE_NEW_EDITOR.get():
            <a title="${_('Hadoop Security')}" rel="navigator-tooltip" href="#" data-toggle="dropdown" class="dropdown-toggle">Security <b class="caret"></b></a>
            <ul role="menu" class="dropdown-menu">
              % if HIVE_V1.get():
-             <li><a href="${ url('security:hive') }">&nbsp;<img src="/static/metastore/art/icon_metastore_48.png" class="app-icon"></img>&nbsp;&nbsp;${_('Sentry Tables')}</a></li>
+             <li><a href="${ url('security:hive') }">&nbsp;<img src="/static/metastore/art/icon_metastore_48.png" class="app-icon"></img>&nbsp;&nbsp;${_('Hive Tables')}</a></li>
              % endif
              % if HIVE_V2.get():
-             <li><a href="${ url('security:hive2') }">&nbsp;<img src="/static/metastore/art/icon_metastore_48.png" class="app-icon"></img>&nbsp;&nbsp;${_('Sentry Tables v2')}</a></li>
+             <li><a href="${ url('security:hive2') }">&nbsp;<img src="/static/metastore/art/icon_metastore_48.png" class="app-icon"></img>&nbsp;&nbsp;${_('Hive Tables v2')}</a></li>
              % endif
              % if SOLR_V2.get():
              <li><a href="${ url('security:solr') }">&nbsp;<i class="fa fa-database"></i>&nbsp;&nbsp;${_('Solr Collections')}</a></li>
@@ -647,6 +733,5 @@ if USE_NEW_EDITOR.get():
 
 <div id="jHueNotify" class="alert hide">
     <button class="close">&times;</button>
-    <span class="message"></span>
+    <div class="message"></div>
 </div>
-

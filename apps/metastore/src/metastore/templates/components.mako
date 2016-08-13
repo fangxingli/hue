@@ -29,7 +29,7 @@
                   <img src="${ static('metastore/art/icon_metastore_48.png') }" class="app-icon" />
                   ${ _('Metastore Manager') }
                 </a>
-              </li>
+              </li>              
             </ul>
           </div>
         </div>

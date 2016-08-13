@@ -33,14 +33,12 @@ var Authorizable = function (vm, privilege, authorizable) {
     if (privilege.status() == '') {
       privilege.status('modified');
     }
-    privilege.privilegeScope(getPrivilegeScope());
   });
   self.name_ = ko.observable(typeof authorizable.name != "undefined" && authorizable.name != null ? authorizable.name : "");
   self.name_.subscribe(function () {
     if (privilege.status() == '') {
       privilege.status('modified');
     }
-    privilege.privilegeScope(getPrivilegeScope());
   });
 }
 
@@ -70,33 +68,7 @@ var Privilege = function (vm, privilege) {
     if (self.status() == '') {
       self.status('modified');
     }
-    self.privilegeScope(getPrivilegeScope());
   });
-  /**
-  self.dbName = ko.observable(typeof privilege.dbName != "undefined" && privilege.dbName != null ? privilege.dbName : "");
-  self.dbName.subscribe(function () {
-    if (self.status() == '') {
-      self.status('modified');
-    }
-  });
-  self.tableName = ko.observable(typeof privilege.tableName != "undefined" && privilege.tableName != null ? privilege.tableName : "");
-  self.tableName.subscribe(function () {
-    if (self.status() == '') {
-      self.status('modified');
-    }
-  });
-  self.columnName = ko.observable(typeof privilege.columnName != "undefined" && privilege.columnName != null ? privilege.columnName : "");
-  self.columnName.subscribe(function () {
-    if (self.status() == '') {
-      self.status('modified');
-    }
-  });
-  self.URI = ko.observable(typeof privilege.URI != "undefined" && privilege.URI != null ? privilege.URI : "");
-  self.URI.subscribe(function () {
-    if (self.status() == '') {
-      self.status('modified');
-    }
-  });*/
   self.action = ko.observable(typeof privilege.action != "undefined" && privilege.action != null ? privilege.action : 'SELECT');
   self.action.subscribe(function () {
     if (self.status() == '') {
@@ -113,35 +85,61 @@ var Privilege = function (vm, privilege) {
   });
 
   // UI
-  self.privilegeType = ko.observable(typeof privilege.privilegeScope != "undefined" && privilege.privilegeScope == 'URI' ? "uri" : "db");
+  self.privilegeType = ko.computed(function() {
+    var last = self.authorizables().slice(-1)[0];
+    return last ? last.type().toUpperCase() : 'SERVER';
+  });
   self.showAdvanced = ko.observable(false);
   self.path = ko.computed({
     read: function () {
-      var path = $.map(self.authorizables(), function(authorizable) {
-        if (authorizable.name_() !== ''){
-          return authorizable.name_();
-        }
-      }).join(".");
-      return path;
+      if (vm.component() == 'solr') {
+        return $.map(self.authorizables(), function (authorizable) {
+          if (authorizable.name_() !== '') {
+            if (authorizable.type() === 'COLLECTION') {
+              return 'collections.' + authorizable.name_();
+            }
+            else {
+              return 'configs.' + authorizable.name_();
+            }
+          }
+        }).join("");
+      }
+      else {
+        return $.map(self.authorizables(), function (authorizable) {
+          if (authorizable.name_() !== '') {
+            return authorizable.name_();
+          }
+        }).join(".");
+      }
     },
     write: function (value) {
       var _parts = value.split(".");
 
       self.authorizables.removeAll();
-      self.authorizables.push(new Authorizable(vm, self, {type: 'DATABASE', name: _parts[0]}))
-      if (_parts.length > 1) {
-        self.authorizables.push(new Authorizable(vm, self, {type: 'TABLE', name: _parts[1]}))
-      }
-      if (_parts.length > 2) {
-        self.authorizables.push(new Authorizable(vm, self, {type: 'COLUMN', name: _parts[2]}))
+
+      if (vm.component() == 'solr') {
+        if (_parts[0] == 'collections') {
+          self.authorizables.push(new Authorizable(vm, self, {type: 'COLLECTION', name: _parts[1]}))
+        }
+        else if (_parts[0] == 'configs') {
+          self.authorizables.push(new Authorizable(vm, self, {type: 'CONFIG', name: _parts[1]}))
+        }
+      } else {
+        self.authorizables.push(new Authorizable(vm, self, {type: 'DATABASE', name: _parts[0]}))
+        if (_parts.length > 1) {
+          self.authorizables.push(new Authorizable(vm, self, {type: 'TABLE', name: _parts[1]}))
+        }
+        if (_parts.length > 2) {
+          self.authorizables.push(new Authorizable(vm, self, {type: 'COLUMN', name: _parts[2]}))
+        }
       }
     },
     owner: self
   });
 
   self.indexerPath = ko.computed(function () {
-    if (self.authorizables()[1] && self.authorizables()[1]['type'] == 'TABLE') {
-      return '/indexer/#edit/' + self.authorizables()[1];
+    if (self.authorizables().length > 0 && self.authorizables()[0].type() == 'COLLECTION') {
+      return '/indexer/#edit/' + self.authorizables()[0].name_();
     }
     else {
       return '/indexer/#manage';
@@ -164,39 +162,6 @@ var Privilege = function (vm, privilege) {
     return path;
   });
 
-  // TODO remove
-  function getPrivilegeScope() {
-    if (self.privilegeType() == 'uri') {
-      return 'URI';
-    } else if (self.authorizables()[2] == 'COLUMN') {
-      return 'COLUMN';
-    } else if (self.authorizables()[1] == 'TABLE') {
-      return 'TABLE';
-    } else if (self.authorizables()[0] == 'DATABASE') {
-      return 'DATABASE';
-    } else {
-      return 'SERVER';
-    }
-  }
-
-  self.privilegeScope = ko.observable(typeof privilege.privilegeScope != "undefined" ? privilege.privilegeScope : getPrivilegeScope());
-/**
-  self.privilegeType.subscribe(function(newVal){
-    self.privilegeScope(getPrivilegeScope());
-  });
-
-  self.columnName.subscribe(function(newVal){
-    self.privilegeScope(getPrivilegeScope());
-  });
-
-  self.tableName.subscribe(function(newVal){
-    self.privilegeScope(getPrivilegeScope());
-  });
-
-  self.dbName.subscribe(function(newVal){
-    self.privilegeScope(getPrivilegeScope());
-  });
-*/
   self.remove = function (privilege) {
     if (privilege.status() == 'new') {
       privilege.status('alreadydeleted');
@@ -232,6 +197,8 @@ var Role = function (vm, role) {
 
   self.groups = ko.observableArray();
   self.originalGroups = ko.observableArray();
+  self.groups.extend({ rateLimit: 300 });
+  self.originalGroups.extend({ rateLimit: 300 });
   $.each(typeof role.groups != "undefined" && role.groups != null ? role.groups : [], function (index, group) {
     self.groups.push(group);
     self.originalGroups.push(group);
@@ -257,6 +224,11 @@ var Role = function (vm, role) {
 
   self.showEditGroups = ko.observable(false);
   self.isEditing = ko.observable(false);
+  self.isValid = ko.computed(function () {
+    return $.grep(self.privileges(), function (privilege) {
+      return privilege.path() === '';
+    }).length === 0;
+  });
 
   self.privilegesChanged = ko.computed(function () {
     return $.grep(self.privileges(), function (privilege) {
@@ -267,6 +239,7 @@ var Role = function (vm, role) {
   self.groupsChanged = ko.computed(function () {
     return !($(self.groups()).not(self.originalGroups()).length == 0 && $(self.originalGroups()).not(self.groups()).length == 0);
   });
+  self.groupsChanged.extend({ rateLimit: 300 });
 
   self.privilegesForView = ko.computed(function() {
     var _filter = vm.privilegeFilter().toLowerCase();
@@ -275,7 +248,10 @@ var Role = function (vm, role) {
     }
     else {
       var _filtered = ko.utils.arrayFilter(self.privileges(), function (priv) {
-        return priv.dbName().toLowerCase().indexOf(_filter) > -1 || priv.tableName().toLowerCase().indexOf(_filter) > -1 || priv.action().toLowerCase().indexOf(_filter) > -1;
+        return $.grep(priv.authorizables(), function(auth) {
+            return auth.name_().toLowerCase().indexOf(_filter) > -1;
+        }).length > 0 ||
+        priv.action().toLowerCase().indexOf(_filter) > -1;
       });
       return _filtered.slice(0, self.privilegesForViewTo());
     }
@@ -294,21 +270,11 @@ var Role = function (vm, role) {
   }
 
   self.addPrivilege = function () {
-    if (vm.getSectionHash() == 'edit') { // used?
-      self.privileges.push(new Privilege(vm, {
-          'serverName': vm.assist.server(),
-          'status': 'new',
-          'component': vm.component(),
-          'editing': true,
-          'authorizables': [
-              {'type': 'DATABASE', 'name': vm.assist.db()},
-              {'type': 'TABLE', 'name': vm.assist.table()},
-              {'type': 'COLUMN', 'name': vm.assist.column()}
-           ]
-      }));
-    } else {
-      self.privileges.push(new Privilege(vm, {'serverName': vm.assist.server(), 'status': 'new', 'editing': true}));
+    var privilege = new Privilege(vm, {'serverName': vm.assist.server(), 'status': 'new', 'editing': true});
+    if (vm.assist.path() && vm.getSectionHash() == 'edit') {
+      privilege.path(vm.assist.path());
     }
+    self.privileges.push(privilege);
   }
 
   self.resetGroups = function () {
@@ -340,44 +306,48 @@ var Role = function (vm, role) {
 
   self.create = function () {
     $(".jHueNotify").hide();
-    $.post("/security/api/sentry/create_role", {
-      role: ko.mapping.toJSON(self),
-      component: vm.component()
-    }, function (data) {
-      if (data.status == 0) {
-        $(document).trigger("info", data.message);
-        vm.showCreateRole(false);
-        self.reset();
-        var role = new Role(vm, data.role);
-        role.showPrivileges(true);
-        vm.originalRoles.unshift(role);
-        vm.list_sentry_privileges_by_authorizable();
-        $(document).trigger("created.role");
-      } else {
-        $(document).trigger("error", data.message);
-      }
-    }).fail(function (xhr, textStatus, errorThrown) {
-      $(document).trigger("error", xhr.responseText);
-    });
+    if (self.isValid()) {
+      $.post("/security/api/sentry/create_role", {
+        role: ko.mapping.toJSON(self),
+        component: vm.component()
+      }, function (data) {
+        if (data.status == 0) {
+          $(document).trigger("info", data.message);
+          vm.showCreateRole(false);
+          self.reset();
+          var role = new Role(vm, data.role);
+          role.showPrivileges(true);
+          vm.originalRoles.unshift(role);
+          vm.list_sentry_privileges_by_authorizable();
+          $(document).trigger("created.role");
+        } else {
+          $(document).trigger("error", data.message);
+        }
+      }).fail(function (xhr, textStatus, errorThrown) {
+        $(document).trigger("error", xhr.responseText);
+      });
+    }
   }
 
   self.update = function () {
     $(".jHueNotify").hide();
-    $.post("/security/api/sentry/save_privileges", {
-      role: ko.mapping.toJSON(self),
-      component: vm.component()
-    }, function (data) {
-      if (data.status == 0) {
-        $(document).trigger("info", data.message);
-        vm.showCreateRole(false);
-        vm.list_sentry_privileges_by_authorizable();
-        $(document).trigger("created.role");
-      } else {
-        $(document).trigger("error", data.message);
-      }
-    }).fail(function (xhr, textStatus, errorThrown) {
-      $(document).trigger("error", xhr.responseText);
-    });
+    if (self.isValid()) {
+      $.post("/security/api/sentry/save_privileges", {
+        role: ko.mapping.toJSON(self),
+        component: vm.component()
+      }, function (data) {
+        if (data.status == 0) {
+          $(document).trigger("info", data.message);
+          vm.showCreateRole(false);
+          vm.list_sentry_privileges_by_authorizable();
+          $(document).trigger("created.role");
+        } else {
+          $(document).trigger("error", data.message);
+        }
+      }).fail(function (xhr, textStatus, errorThrown) {
+        $(document).trigger("error", xhr.responseText);
+      });
+    }
   }
 
   self.remove = function (role) {
@@ -702,7 +672,12 @@ var Assist = function (vm, initial) {
       self.updatePathProperty(self.growingTree(), obj.path(), "isExpanded", obj.isExpanded());
     }
 
-    self.path(obj.path());
+    if (vm.component() === 'solr' && obj.path() !== '' && obj.path().indexOf('.') == -1) {
+      self.path(obj.path() + '.*');
+    }
+    else {
+      self.path(obj.path());
+    }
     $(document).trigger("changed.path");
 
     if (self.getTreeAdditionalDataForPath(obj.path()).loaded){
@@ -827,6 +802,10 @@ var Assist = function (vm, initial) {
   self.fetchAuthorizablesPath = function (optionalPath, loadCallback) {
     var _originalPath = typeof optionalPath != "undefined" ? optionalPath : self.path();
 
+    if (vm.component() === 'solr' && _originalPath.indexOf('.*') > -1) {
+      _originalPath = _originalPath.split('.')[0];
+    }
+
     if (_originalPath.split(".").length < 4) {
       self.isLoadingTree(true);
 
@@ -892,10 +871,12 @@ var SentryViewModel = function (initial) {
   self.isLoadingPrivileges = ko.observable(true);
   self.isApplyingBulk = ko.observable(false);
 
-  self.availablePrivileges = ko.observableArray(['SERVER', 'DATABASE', 'TABLE', 'COLUMN']);
+  self.availablePrivileges = ko.observableArray();
   self.availableActions = ko.observableArray();
+  self.availableSolrConfigActions = ko.observableArray();
   if (initial.component == 'solr') {
     self.availableActions(['QUERY', 'UPDATE', 'ALL']);
+    self.availableSolrConfigActions(['ALL']);
   } else {
     self.availableActions(['SELECT', 'INSERT', 'ALL']);
   }
@@ -924,10 +905,10 @@ var SentryViewModel = function (initial) {
         });
         var _inPrivileges = false;
         role.privileges().forEach(function (priv) {
-          if (priv.dbName().toLowerCase().indexOf(_filter) > -1 || priv.tableName().toLowerCase().indexOf(_filter) > -1
-              || priv.URI().toLowerCase().indexOf(_filter) > -1
-              || priv.action().toLowerCase().indexOf(_filter) > -1
-              || priv.serverName().toLowerCase().indexOf(_filter) > -1) {
+          var matches = $.grep(priv.authorizables(), function(auth) {
+            return auth.name_().toLowerCase().indexOf(_filter) > -1;
+          });
+          if (matches.length > 0 || priv.action().toLowerCase().indexOf(_filter) > -1) {
             _inPrivileges = true;
           }
         });
@@ -985,8 +966,11 @@ var SentryViewModel = function (initial) {
   }, self);
 
   self.selectAllRoles = function () {
-    self.allRolesSelected(! self.allRolesSelected());
+    self.allRolesSelected(!self.allRolesSelected());
     ko.utils.arrayForEach(self.roles(), function (role) {
+      role.selected(false);
+    });
+    ko.utils.arrayForEach(self.filteredRoles(), function (role) {
       role.selected(self.allRolesSelected());
     });
     return true;
@@ -1147,23 +1131,39 @@ var SentryViewModel = function (initial) {
   }
 
   function _create_authorizable_from_ko(optionalPath) {
-	var authorizables = [];
+    var authorizables = [];
 
-    if (optionalPath != null) {
-      var paths = optionalPath.split(/[.]/);
+    var paths = optionalPath.split(/[.]/);
 
-      if (paths[0]) { authorizables.push({'type': 'db', 'name': paths[0]}); }
-      if (paths[1]) { authorizables.push({'type': 'table', 'name': paths[1]}); }
-      if (paths[2]) { authorizables.push({'type': 'column', 'name': paths[2]}); }
-    } else {
-      authorizables.push({'type': 'column', 'name': self.assist.db()});
-      authorizables.push({'type': 'table', 'name': self.assist.table()});
-      authorizables.push({'type': 'column', 'name': self.assist.column()});
-    }
+    if (self.component() == 'solr') {
+      if (paths.length > 1) {
+        if (paths[0] == 'configs') {
+          authorizables.push({'type': 'CONFIG', 'name': paths[1]});
+        } else {
+          authorizables.push({'type': 'COLLECTION', 'name': paths[1]});
+        }
+      }
+    } else { // TODO Hive
+       if (optionalPath != null) {
+        if (paths[0]) {
+          authorizables.push({'type': 'DATABASE', 'name': paths[0]});
+        }
+        if (paths[1]) {
+          authorizables.push({'type': 'TABLE', 'name': paths[1]});
+        }
+        if (paths[2]) {
+          authorizables.push({'type': 'COLUMN', 'name': paths[2]});
+        }
+      } else {
+        authorizables.push({'type': 'COLUMN', 'name': self.assist.db()});
+        authorizables.push({'type': 'TABLE', 'name': self.assist.table()});
+        authorizables.push({'type': 'COLUMN', 'name': self.assist.column()});
+      }
+   }
 
-	return {
-	    'server': self.assist.server(),
-		'authorizables': authorizables
+    return {
+        'server': self.assist.server(),
+        'authorizables': authorizables
     };
   }
 
@@ -1222,13 +1222,14 @@ var SentryViewModel = function (initial) {
       type: "POST",
       url: "/security/api/sentry/list_sentry_privileges_by_authorizable",
       data: {
+        server: self.server(),
         groupName: $('#selectedGroup').val(),
         roleSet: ko.mapping.toJSON({all: true, roles: []}),
         authorizableHierarchy: ko.mapping.toJSON(_create_authorizable_from_ko(_path)),
         component: self.component()
       },
       success: function (data) {
-    	if (data.status == 0) {
+        if (data.status == 0) {
           var _privileges = [];
           $.each(data.privileges, function (index, item) {
             if (typeof skipList == "undefined" || (skipList != null && typeof skipList == "Boolean" && !skipList)){
@@ -1256,9 +1257,9 @@ var SentryViewModel = function (initial) {
             self.assist.privileges(_privileges);
           }
           self.assist.loadData(self.assist.growingTree());
-    	} else {
-    	  $(document).trigger("error", data.message);
-    	}
+        } else {
+          $(document).trigger("error", data.message);
+        }
       }
     }).fail(function (xhr, textStatus, errorThrown) {
       $(document).trigger("error", xhr.responseText);

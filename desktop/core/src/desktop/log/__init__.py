@@ -34,7 +34,7 @@ from desktop.log.formatter import MessageOnlyFormatter
 DEFAULT_LOG_DIR = 'logs'
 LOG_FORMAT = '[%(asctime)s] %(module)-12s %(levelname)-8s %(message)s'
 DATE_FORMAT = '%d/%b/%Y %H:%M:%S %z'
-
+FORCE_DEBUG = False
 CONF_RE = re.compile('%LOG_DIR%|%PROC_NAME%')
 
 _log_dir = None
@@ -127,6 +127,8 @@ def basic_logging(proc_name, log_dir=None):
 
   This removes all previously installed logging handlers.
   """
+  global FORCE_DEBUG
+
   # Setup log_dir
   if not log_dir:
     log_dir = os.getenv("DESKTOP_LOG_DIR", DEFAULT_LOG_DIR)
@@ -159,7 +161,7 @@ def basic_logging(proc_name, log_dir=None):
 
   # Handle env variables
   env_loglevel = os.getenv("DESKTOP_LOGLEVEL")
-  env_debug = os.getenv('DESKTOP_DEBUG')
+  env_debug = os.getenv('DESKTOP_DEBUG') or FORCE_DEBUG
   if env_debug:
     env_loglevel = 'DEBUG'
 
@@ -188,7 +190,7 @@ def fancy_logging():
   """Configure logging into a buffer for /logs endpoint."""
   from log_buffer import FixedBufferHandler
 
-  BUFFER_SIZE = 10 * 1024 * 1024 # This is the size in characters, not bytes
+  BUFFER_SIZE = 1500 * 200 # This is the size in characters, not bytes. Targets about 1500 rows.
   buffer_handler = FixedBufferHandler(BUFFER_SIZE)
   _formatter = formatter.Formatter(LOG_FORMAT, DATE_FORMAT)
 
@@ -197,3 +199,27 @@ def fancy_logging():
   buffer_handler.setFormatter(_formatter)
   root_logger = logging.getLogger()
   root_logger.addHandler(buffer_handler)
+
+
+def get_all_debug():
+  global FORCE_DEBUG
+
+  return FORCE_DEBUG
+
+
+def set_all_debug():
+  from desktop.settings import ENV_HUE_PROCESS_NAME # Circular dependency
+  global FORCE_DEBUG
+
+  FORCE_DEBUG = True
+  basic_logging(os.environ[ENV_HUE_PROCESS_NAME])
+  fancy_logging()
+
+
+def reset_all_debug():
+  from desktop.settings import ENV_HUE_PROCESS_NAME # Circular dependency
+  global FORCE_DEBUG
+
+  FORCE_DEBUG = False
+  basic_logging(os.environ[ENV_HUE_PROCESS_NAME])
+  fancy_logging()

@@ -6,18 +6,14 @@ Welcome to the repository for Hue
 
 Hue is an open source Web interface for analyzing data with any Apache Hadoop: [gethue.com](http://gethue.com)
 
-![alt text](https://raw.githubusercontent.com/cloudera/hue/master/docs/images/hue-screen.png "Hue Screenshot")
+![alt text](https://raw.githubusercontent.com/cloudera/hue/master/docs/images/sql-editor.png "Hue Screenshot")
 
 It features:
 
-   * SQL Editors for Hive, Impala, MySql, PostGres, Sqlite and Oracle
-   * Dynamic search dashboards for Solr
-   * Spark Notebooks
-   * Browsers for YARN, HDFS, Hive table Metastore, HBase, ZooKeeper
-   * Pig Editor, Sqoop2, Oozie workflows Editors and Dashboards
-   * Wizards to import data into Hadoop
-
-On top of that, an SDK is available for creating new apps integrated with Hadoop.
+   * SQL editors for Hive, Impala, MySQL, Oracle, PostgreSQL, SparkSQL, Solr SQL, Phoenix...
+   * Dynamic Search dashboards with Solr
+   * Spark and Hadoop notebooks
+   * Scheduling of jobs and workflows through an Oozie Editor and Dashboard
 
 More user and developer documentation is available at [gethue.com](http://gethue.com).
 
@@ -60,8 +56,14 @@ $ build/env/bin/hue test specific impala.tests:TestMockedImpala.test_basic_flow
 ```
 
 
+Docker
+------
+Start Hue in a single click with the [Docker Guide](https://github.com/cloudera/hue/tree/master/tools/docker) or the
+[video blog post](http://gethue.com/getting-started-with-hue-in-2-minutes-with-docker/).
+
+
 Development Prerequisites
------------
+-------------------------
 You'll need these library development packages and tools installed on
 your system:
 
@@ -71,12 +73,13 @@ __Ubuntu:__
 * ant
 * gcc
 * g++
+* libffi-dev
 * libkrb5-dev
 * libmysqlclient-dev
-* libssl-dev
 * libsasl2-dev
 * libsasl2-modules-gssapi-mit
 * libsqlite3-dev
+* libssl-dev
 * libtidy-0.99-0 (for unit tests only)
 * libxml2-dev
 * libxslt-dev
@@ -95,9 +98,11 @@ __CentOS/RHEL:__
 * asciidoc
 * cyrus-sasl-devel
 * cyrus-sasl-gssapi
+* cyrus-sasl-plain
 * gcc
 * gcc-c++
 * krb5-devel
+* libffi-devel
 * libtidy (for unit tests only)
 * libxml2-devel
 * libxslt-devel
@@ -120,6 +125,11 @@ __MacOS:__
 * gmp (Homebrew)
 * openssl (Homebrew)
 * Required for Mac OS X 10.11+ (El Capitan), after ``brew install openssl``, run: ``export LDFLAGS=-L/usr/local/opt/openssl/lib && export CPPFLAGS=-I/usr/local/opt/openssl/include``
+
+__All, just in case you want to run the Jasmine tests:__
+
+* NodeJS (https://nodejs.org/)
+* PhantomJS (npm install -g phantomjs-prebuilt)
 
 
 File Layout

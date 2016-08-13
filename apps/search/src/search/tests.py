@@ -114,7 +114,7 @@ class TestWithMockedSolr(TestSearchBase):
     assert_true('denied' in data['message'], response.content)
 
     # Admin
-    c = make_logged_in_client(username='admin', is_superuser=True)
+    c = make_logged_in_client(username='admin', is_superuser=True, recreate=True)
     response = c.post(reverse('search:update_document'), {
         'collection': json.dumps(self._get_collection_param(self.collection)),
         'document': json.dumps({'hasChanged': False})
@@ -317,7 +317,7 @@ class TestWithMockedSolr(TestSearchBase):
         'collection': json.dumps(self._get_collection_param(self.collection)),
         'query': json.dumps(QUERY)
     })
-    xls_response_content = ''.join(xls_response.streaming_content)
+    xls_response_content = ''.join(xls_response.content)
     assert_not_equal(0, len(xls_response_content))
     assert_equal('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls_response['Content-Type'])
     assert_equal('attachment; filename=query_result.xlsx', xls_response['Content-Disposition'])

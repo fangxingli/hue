@@ -28,15 +28,20 @@ from boto.exception import S3ResponseError
 from boto.s3.key import Key
 from boto.s3.prefix import Prefix
 
-from aws import s3
-from aws.s3 import translate_s3_error, s3file
-from aws.s3.s3stat import S3Stat
+from django.utils.translation import ugettext as _
 
-from hadoop.fs import normpath
+from aws import s3
+from aws.s3 import normpath, s3file, translate_s3_error, S3_ROOT
+from aws.s3.s3stat import S3Stat
 
 
 DEFAULT_READ_SIZE = 1024 * 1024  # 1MB
+
 LOG = logging.getLogger(__name__)
+
+
+class S3FileSystemException(Exception):
+  pass
 
 
 class S3FileSystem(object):
@@ -56,6 +61,38 @@ class S3FileSystem(object):
     if name not in self._bucket_cache:
       self._bucket_cache[name] = self._s3_connection.get_bucket(name)
     return self._bucket_cache[name]
+
+  def _get_or_create_bucket(self, name):
+    try:
+      bucket = self._get_bucket(name)
+    except S3ResponseError, e:
+      if e.status == 403:
+        raise S3FileSystemException(_('User is not authorized to access bucket named "%s". '
+          'If you are attempting to create a bucket, this bucket name is already reserved.') % name)
+      elif e.status == 404:
+        bucket = self._s3_connection.create_bucket(name)
+        self._bucket_cache[name] = bucket
+      else:
+        raise e
+    return bucket
+
+  def _delete_bucket(self, name):
+    try:
+      # Verify that bucket exists and user has permissions to access it
+      bucket = self._get_bucket(name)
+      # delete keys from bucket first
+      for key in bucket.list():
+        key.delete()
+      self._s3_connection.delete_bucket(name)
+      # Remove bucket from bucket cache
+      self._bucket_cache.pop(name)
+      LOG.info('Successfully deleted bucket name "%s" and all its contents.' % name)
+    except S3ResponseError, e:
+      if e.status == 403:
+        raise S3FileSystemException(_('User is not authorized to access bucket named "%s". '
+          'If you are attempting to create a bucket, this bucket name is already reserved.') % name)
+      else:
+        raise S3FileSystemException(e.message)
 
   def _get_key(self, path, validate=True):
     bucket_name, key_name = s3.parse_uri(path)[:2]
@@ -117,6 +154,19 @@ class S3FileSystem(object):
   def normpath(path):
     return normpath(path)
 
+  @staticmethod
+  def parent_path(path):
+    parent_dir = S3FileSystem._append_separator(path)
+    if not s3.is_root(parent_dir):
+      bucket_name, key_name, basename = s3.parse_uri(path)
+      if not basename:  # bucket is top-level so return root
+        parent_dir = S3_ROOT
+      else:
+        bucket_path = '%s%s' % (S3_ROOT, bucket_name)
+        key_path = '/'.join(key_name.split('/')[:-1])
+        parent_dir = s3.abspath(bucket_path, key_path)
+    return parent_dir
+
   @translate_s3_error
   def open(self, path, mode='r'):
     key = self._get_key(path, validate=True)
@@ -159,7 +209,7 @@ class S3FileSystem(object):
   @translate_s3_error
   def listdir_stats(self, path, glob=None):
     if glob is not None:
-      raise NotImplementedError("Option `glob` is not implemented")
+      raise NotImplementedError(_("Option `glob` is not implemented"))
 
     if s3.is_root(path):
       self._init_bucket_cache()
@@ -178,42 +228,45 @@ class S3FileSystem(object):
         res.append(self._stats_key(item))
     return res
 
+  @translate_s3_error
   def listdir(self, path, glob=None):
     return [s3.parse_uri(x.path)[2] for x in self.listdir_stats(path, glob)]
 
   @translate_s3_error
-  def rmtree(self, path, skipTrash=False):
+  def rmtree(self, path, skipTrash=True):
     if not skipTrash:
-      raise NotImplementedError('Moving to trash is not implemented for S3')
-    key = self._get_key(path, validate=False)
+      raise NotImplementedError(_('Moving to trash is not implemented for S3'))
 
-    if key.exists():
-      to_delete = iter([key])
+    bucket_name, key_name = s3.parse_uri(path)[:2]
+    if bucket_name and not key_name:
+      self._delete_bucket(bucket_name)
     else:
-      to_delete = iter([])
+      key = self._get_key(path, validate=False)
 
-    if self.isdir(path):
-      # add `/` to prevent removing of `s3://b/a_new` trying to remove `s3://b/a`
-      prefix = self._append_separator(key.name)
-      keys = key.bucket.list(prefix=prefix)
-      to_delete = itertools.chain(keys, to_delete)
-    result = key.bucket.delete_keys(to_delete)
-    if result.errors:
-      msg = "%d errors occurred during deleting '%s':\n%s" % (
-        len(result.errors),
-        '\n'.join(map(repr, result.errors)))
-      LOG.error(msg)
-      raise IOError(msg)
+      if key.exists():
+        to_delete = iter([key])
+      else:
+        to_delete = iter([])
+
+      if self.isdir(path):
+        # add `/` to prevent removing of `s3://b/a_new` trying to remove `s3://b/a`
+        prefix = self._append_separator(key.name)
+        keys = key.bucket.list(prefix=prefix)
+        to_delete = itertools.chain(keys, to_delete)
+      result = key.bucket.delete_keys(to_delete)
+      if result.errors:
+        msg = "%d errors occurred during deleting '%s':\n%s" % (
+          len(result.errors),
+          '\n'.join(map(repr, result.errors)))
+        LOG.error(msg)
+        raise S3FileSystemException(msg)
 
   @translate_s3_error
-  def remove(self, path, skip_trash=False):
-    if not skip_trash:
-      raise NotImplementedError('Moving to trash is not implemented for S3')
-    key = self._get_key(path, validate=False)
-    key.bucket.delete_key(key.name)
+  def remove(self, path, skip_trash=True):
+    self.rmtree(path, skipTrash=skip_trash)
 
   def restore(self, *args, **kwargs):
-    raise NotImplementedError('Moving to trash is not implemented for S3')
+    raise NotImplementedError(_('Moving to trash is not implemented for S3'))
 
   @translate_s3_error
   def mkdir(self, path, *args, **kwargs):
@@ -222,6 +275,8 @@ class S3FileSystem(object):
 
     Actually it creates an empty object: s3://[bucket]/[path]/
     """
+    bucket_name, key_name = s3.parse_uri(path)[:2]
+    self._get_or_create_bucket(bucket_name)
     stats = self._stats(path)
     if stats:
       if stats.isDir:
@@ -273,7 +328,7 @@ class S3FileSystem(object):
 
     for key in src_bucket.list(prefix=src_key):
       if not key.name.startswith(src_key):
-        raise RuntimeError("Invalid key to transform: %s" % key.name)
+        raise RuntimeError(_("Invalid key to transform: %s") % key.name)
       dst_name = posixpath.normpath(s3.join(dst_key, key.name[cut:]))
       key.copy(dst_bucket, dst_name)
 
@@ -281,6 +336,8 @@ class S3FileSystem(object):
   def rename(self, old, new):
     new = s3.abspath(old, new)
     self.copy(old, new, recursive=True)
+    if self.isdir(old):
+      self.rename_star(old, new)
     self.rmtree(old, skipTrash=True)
 
   @translate_s3_error
@@ -324,6 +381,17 @@ class S3FileSystem(object):
       else:
         remote_file = remote_dst
       _copy_file(local_src, remote_file)
+
+  @translate_s3_error
+  def upload(self, file, path, *args, **kwargs):
+    pass  # upload is handled by S3FileUploadHandler
+
+  @translate_s3_error
+  def append(self, path, data):
+    key = self._get_key(path, validate=False)
+    current_data = key.get_contents_as_string() or ''
+    new_data = data or ''
+    key.set_contents_from_string(current_data + new_data, replace=True)
 
   def setuser(self, user):
     pass  # user-concept doesn't have sense for this implementation

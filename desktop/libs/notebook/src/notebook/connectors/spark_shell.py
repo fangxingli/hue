@@ -19,15 +19,20 @@ import logging
 import re
 import time
 
-
-LOG = logging.getLogger(__name__)
-
-
 from django.utils.translation import ugettext as _
 
+from desktop.conf import USE_DEFAULT_CONFIGURATION
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.i18n import force_unicode
 from desktop.lib.rest.http_client import RestException
+from desktop.models import DefaultConfiguration
+
+from notebook.data_export import download as spark_download
+from notebook.connectors.base import Api, QueryError, SessionExpired, _get_snippet_session
+
+
+LOG = logging.getLogger(__name__)
+
 
 try:
   from spark.conf import LIVY_SERVER_SESSION_KIND
@@ -35,34 +40,120 @@ try:
 except ImportError, e:
   LOG.exception('Spark is not enabled')
 
-from notebook.data_export import download as spark_download
-from notebook.connectors.base import SessionExpired, _get_snippet_session, Api,\
-  QueryError
+
+class SparkConfiguration(object):
+
+  APP_NAME = 'spark'
+
+  PROPERTIES = [
+    {
+      "name": "jars",
+      "nice_name": _("Jars"),
+      "help_text": _("Add one or more JAR files to the list of resources."),
+      "type": "csv-hdfs-files",
+      "is_yarn": False,
+      "multiple": True,
+      "defaultValue": [],
+      "value": [],
+    }, {
+      "name": "files",
+      "nice_name": _("Files"),
+      "help_text": _("Files to be placed in the working directory of each executor."),
+      "type": "csv-hdfs-files",
+      "is_yarn": False,
+      "multiple": True,
+      "defaultValue": [],
+      "value": [],
+    }, {
+      "name": "pyFiles",
+      "nice_name": _("pyFiles"),
+      "help_text": _("Python files to be placed in the working directory of each executor."),
+      "type": "csv-hdfs-files",
+      "is_yarn": False,
+      "multiple": True,
+      "defaultValue": [],
+      "value": [],
+    }, {
+      "name": "driverMemory",
+      "nice_name": _("Driver Memory"),
+      "help_text": _("Amount of memory to use for the driver process in GB. (Default: 1). "),
+      "type": "jvm",
+      "is_yarn": False,
+      "multiple": False,
+      "defaultValue": '1G',
+      "value": '1G',
+    },
+    # YARN-only properties
+    {
+      "name": "driverCores",
+      "nice_name": _("Driver Cores"),
+      "help_text": _("Number of cores used by the driver, only in cluster mode (Default: 1)"),
+      "type": "number",
+      "is_yarn": True,
+      "multiple": False,
+      "defaultValue": 1,
+      "value": 1,
+    }, {
+      "name": "executorMemory",
+      "nice_name": _("Executor Memory"),
+      "help_text": _("Amount of memory to use per executor process in GB. (Default: 1)"),
+      "type": "jvm",
+      "is_yarn": True,
+      "multiple": False,
+      "defaultValue": '1G',
+      "value": '1G',
+    }, {
+      "name": "executorCores",
+      "nice_name": _("Executor Cores"),
+      "help_text": _("Number of cores used by the driver, only in cluster mode (Default: 1)"),
+      "type": "number",
+      "is_yarn": True,
+      "multiple": False,
+      "defaultValue": 1,
+      "value": 1,
+    }, {
+      "name": "queue",
+      "nice_name": _("Queue"),
+      "help_text": _("The YARN queue to submit to, only in cluster mode (Default: default)"),
+      "type": "string",
+      "is_yarn": True,
+      "multiple": False,
+      "defaultValue": 'default',
+      "value": 'default',
+    }, {
+      "name": "archives",
+      "nice_name": _("Archives"),
+      "help_text": _("Archives to be extracted into the working directory of each executor, only in cluster mode."),
+      "type": "csv-hdfs-files",
+      "is_yarn": True,
+      "multiple": True,
+      "defaultValue": [],
+      "value": [],
+    }
+  ]
 
 
 class SparkApi(Api):
-
-  PROPERTIES = [
-    {'name': 'jars', 'nice_name': _('Jars'), 'default': '', 'type': 'csv-hdfs-files', 'is_yarn': False},
-    {'name': 'files', 'nice_name': _('Files'), 'default': '', 'type': 'csv-hdfs-files', 'is_yarn': False},
-    {'name': 'pyFiles', 'nice_name': _('pyFiles'), 'default': '', 'type': 'csv-hdfs-files', 'is_yarn': False},
-
-    {'name': 'driverMemory', 'nice_name': _('Driver Memory'), 'default': '1', 'type': 'jvm', 'is_yarn': False},
-
-    {'name': 'driverCores', 'nice_name': _('Driver Cores'), 'default': '1', 'type': 'number', 'is_yarn': True},
-    {'name': 'executorMemory', 'nice_name': _('Executors Memory'), 'default': '1', 'type': 'jvm', 'is_yarn': True},
-    {'name': 'executorCores', 'nice_name': _('Executor Cores'), 'default': '1', 'type': 'number', 'is_yarn': True},
-    {'name': 'totalExecutorCores', 'nice_name': _('Total Executor Cores'), 'default': '1', 'type': 'number', 'is_yarn': True},
-    {'name': 'queue', 'nice_name': _('Queue'), 'default': '1', 'type': 'string', 'is_yarn': True},
-    {'name': 'archives', 'nice_name': _('Archives'), 'default': '', 'type': 'csv-hdfs-files', 'is_yarn': True},
-    {'name': 'numExecutors', 'nice_name': _('Executors Numbers'), 'default': '1', 'type': 'number', 'is_yarn': True},
-  ]
 
   SPARK_UI_RE = re.compile("Started SparkUI at (http[s]?://([0-9a-zA-Z-_\.]+):(\d+))")
   YARN_JOB_RE = re.compile("tracking URL: (http[s]?://.+/)")
   STANDALONE_JOB_RE = re.compile("Got job (\d+)")
 
+  @staticmethod
+  def get_properties():
+    return SparkConfiguration.PROPERTIES
+
   def create_session(self, lang='scala', properties=None):
+    if not properties:
+      config = None
+      if USE_DEFAULT_CONFIGURATION.get():
+        config = DefaultConfiguration.objects.get_configuration_for_user(app='spark', user=self.user)
+
+      if config is not None:
+        properties = config.properties_list
+      else:
+        properties = self.get_properties()
+
     props = dict([(p['name'], p['value']) for p in properties]) if properties is not None else {}
 
     props['kind'] = lang
@@ -101,7 +192,7 @@ class SparkApi(Api):
       }
     except Exception, e:
       message = force_unicode(str(e)).lower()
-      if 'session not found' in message or 'connection refused' in message or 'session is in state busy' in message:
+      if re.search("session ('\d+' )?not found", message) or 'connection refused' in message or 'session is in state busy' in message:
         raise SessionExpired(e)
       else:
         raise e
@@ -118,7 +209,7 @@ class SparkApi(Api):
       }
     except Exception, e:
       message = force_unicode(str(e)).lower()
-      if 'session not found' in message:
+      if re.search("session ('\d+' )?not found", message):
         raise SessionExpired(e)
       else:
         raise e
@@ -132,7 +223,7 @@ class SparkApi(Api):
       response = api.fetch_data(session['id'], cell)
     except Exception, e:
       message = force_unicode(str(e)).lower()
-      if 'session not found' in message:
+      if re.search("session ('\d+' )?not found", message):
         raise SessionExpired(e)
       else:
         raise e
@@ -172,7 +263,7 @@ class SparkApi(Api):
     elif content['status'] == 'error':
       tb = content.get('traceback', None)
 
-      if tb is None:
+      if tb is None or not tb:
         msg = content.get('ename', 'unknown error')
 
         evalue = content.get('evalue')

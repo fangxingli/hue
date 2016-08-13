@@ -20,22 +20,25 @@ from django.utils.translation import ugettext as _
 %>
 
 <%def name="breadcrumbs(path, breadcrumbs, from_listdir=False)">
-    <ul class="nav nav-pills hueBreadcrumbBar">
-        % if from_listdir:
+    % if from_listdir:
+      <ul class="nav nav-pills hueBreadcrumbBar">
+        %if path.lower().find('s3://') != 0:
         <li><a href="${url('filebrowser.views.view', path=urlencode(path))}?default_to_home" class="homeLink"><i class="fa fa-home"></i> ${_('Home')}</a></li>
+        %endif
         <li>
-            <span style="float:right; margin-top:10px;"><i id="editBreadcrumb" class="fa fa-pencil hand" rel="tooltip" title="${_('Edit path')}"></i></span>
-            <ul class="hueBreadcrumb" data-bind="foreach: breadcrumbs" style="padding-right:40px; padding-top: 12px">
-                <li data-bind="visible: label.slice(-1) == '/'"><a href="#" data-bind="click: show"><span class="divider" data-bind="text: label"></span></a></li>
-                <li data-bind="visible: label.slice(-1) != '/'"><a href="#" data-bind="text: label, click: show"></a><span class="divider">/</span></li>
+            <ul id="editBreadcrumb" class="hueBreadcrumb editable-breadcrumbs" data-bind="foreach: breadcrumbs" style="padding-right:40px; padding-top: 12px" title="${_('Edit path')}">
+                <li data-bind="visible: label.slice(-1) == '/'"><a data-bind="click: show, attr:{'href': '${url('filebrowser.views.view', path=urlencode(''))}' + url}"><span class="divider" data-bind="text: label"></span></a></li>
+                <li data-bind="visible: label.slice(-1) != '/'"><a data-bind="text: label, click: show, attr:{'href': '${url('filebrowser.views.view', path=urlencode(''))}' + url}"></a><span class="divider">/</span></li>
             </ul>
-            <input id="hueBreadcrumbText" type="text" class="input-xxlarge" style="margin-top:4px;margin-right:4px;display:none" data-bind="value: currentPath" autocomplete="off" />
+            <input id="hueBreadcrumbText" type="text" style="display:none" data-bind="value: currentPath" autocomplete="off" />
         </li>
+        % if is_trash_enabled:
         <li class="pull-right">
           <a href="${url('filebrowser.views.view', path=urlencode(path))}?default_to_trash" class="trashLink" title="${_('View trash')}">
             <i class="fa fa-trash-o"></i> ${_('Trash')}
           </a>
         </li>
+        % endif
         <li class="pull-right">
           <div class="dropdown history">
             <a href="javascript:void(0)" class="historyLink dropdown-toggle" title="${_('View History')}" data-toggle="dropdown" id="historyDropdown">
@@ -43,7 +46,9 @@ from django.utils.translation import ugettext as _
             </a>
           </div>
         </li>
-        % else:
+      </ul>
+    % else:
+      <ul class="nav nav-pills hueBreadcrumbBar">
         <li><a href="${url('filebrowser.views.view', path=urlencode(path))}?default_to_home" class="homeLink"><i class="fa fa-home"></i> ${_('Home')}</a></li>
         <li>
             <ul class="hueBreadcrumb" style="padding-right:40px; padding-top: 12px">
@@ -63,8 +68,8 @@ from django.utils.translation import ugettext as _
                     % endfor
             </ul>
         </li>
-        % endif
-    </ul>
+      </ul>
+    % endif
 </%def>
 
 

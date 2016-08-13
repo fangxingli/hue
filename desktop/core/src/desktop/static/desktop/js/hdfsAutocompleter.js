@@ -29,6 +29,7 @@
   /**
    * @param {object} options
    * @param {string} options.user
+   * @param {Number} options.timeout
    * @param {Snippet} options.snippet
    *
    * @constructor
@@ -37,6 +38,7 @@
     var self = this;
     self.user = options.user;
     self.snippet = options.snippet;
+    self.timeout = options.timeout
   }
 
   HdfsAutocompleter.prototype.getTotalStorageUserPrefix = function () {
@@ -95,16 +97,20 @@
         }
       };
 
-      self.snippet.getAssistHelper().fetchHdfsPath({
+      self.snippet.getApiHelper().fetchHdfsPath({
         pathParts: parts,
         successCallback: successCallback,
         silenceErrors: true,
         errorCallback: onFailure,
+        timeout: self.timeout,
         editor: editor
       });
     } else {
       onFailure();
     }
+  };
+
+  HdfsAutocompleter.prototype.getDocTooltip = function (item) {
   };
 
   return HdfsAutocompleter;

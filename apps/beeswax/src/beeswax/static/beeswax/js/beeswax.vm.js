@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-function BeeswaxViewModel(server, assistHelper) {
+function BeeswaxViewModel(server, apiHelper) {
   var self = this;
 
   var DESIGN_DEFAULTS = {
@@ -76,10 +76,13 @@ function BeeswaxViewModel(server, assistHelper) {
 
   var type = server === "beeswax" ? "hive" : "impala";
   huePubSub.subscribe("assist.db.panel.ready", function () {
-    huePubSub.publish('assist.set.database', {
-      source: type,
-      name: self.database()
-    });
+    // Defer to let the db be set
+    window.setTimeout(function () {
+      huePubSub.publish('assist.set.database', {
+        source: type,
+        name: self.database()
+      });
+    }, 0);
   });
 
   huePubSub.subscribe("assist.database.selected", function (database) {
@@ -192,6 +195,13 @@ function BeeswaxViewModel(server, assistHelper) {
     self.design.name(design.name);
     self.design.description(design.desc);
     self.database(design.database);
+    if (typeof design.database !== 'undefined' && design.database !== null) {
+      huePubSub.publish('assist.set.database', {
+        source: type,
+        name: design.database
+      });
+    }
+
     self.design.isParameterized(design.is_parameterized);
     self.design.email(design.email_notify);
     self.design.isRedacted(design.is_redacted);
@@ -629,7 +639,20 @@ function BeeswaxViewModel(server, assistHelper) {
       dataType: 'json',
       type: 'POST',
       success: function(data) {
-        $(document).trigger('watched.query', data);
+        if (data.status != 0) {
+          self.setErrors(data.message, data.errors);
+          self.design.isRunning(false);
+          $(document).trigger('error.query');
+          $(document).trigger("error", data.message);
+          if (typeof window.console !== 'undefined') {
+            console.error(data.message);
+          }
+          if (data.log) {
+            self.applyLogs(data.log);
+          }
+        } else {
+          $(document).trigger('watched.query', data);
+        }
       },
       error: function(jqXHR, status, errorThrown) {
         self.design.isRunning(false);

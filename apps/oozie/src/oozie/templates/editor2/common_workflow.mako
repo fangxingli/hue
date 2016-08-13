@@ -157,7 +157,7 @@
       <img src="${ static('oozie/art/icon_beeswax_48.png') }" class="widget-icon">
       <!-- /ko -->
 
-      <!-- ko if: widgetType() == 'hive2-widget' -->
+      <!-- ko if: widgetType() == 'hive2-widget' || widgetType() == 'hive-document-widget' -->
       <img src="${ static('oozie/art/icon_beeswax_48.png') }" class="widget-icon"><sup style="color: #338bb8; margin-left: -4px">2</sup>
       <!-- /ko -->
 
@@ -165,7 +165,7 @@
       <img src="${ static('oozie/art/icon_pig_48.png') }" class="widget-icon">
       <!-- /ko -->
 
-      <!-- ko if: widgetType() == 'java-widget' -->
+      <!-- ko if: widgetType() == 'java-widget' || widgetType() == 'java-document-widget' -->
       <a class="widget-icon"><i class="fa fa-file-code-o"></i></a>
       <!-- /ko -->
 
@@ -494,8 +494,11 @@
       ${ _('Arguments') } <i class="fa fa-plus"></i>
     </a>
   </h6>
-  <ul class="unstyled" data-bind="visible: properties.arguments().length > 0, foreach: properties.arguments">
+  <ul class="unstyled white sortable-arguments" data-bind="visible: properties.arguments().length > 0,  sortable: { data: properties.arguments, options: { axis: 'y', containment: 'parent' }}">
     <li style="margin-bottom: 3px">
+      <span class="muted move-widget">
+        <i class="fa fa-arrows"></i>
+      </span>
       <input type="text" class="span11" data-bind="value: value, attr: { placeholder: $root.workflow_properties.arguments.help_text }" validate="nonempty"/>
       <a href="#" data-bind="click: function(){ $parent.properties.arguments.remove(this); $(document).trigger('drawArrows') }">
         <i class="fa fa-minus"></i>
@@ -531,7 +534,7 @@
   </h6>
   <ul class="unstyled" data-bind="foreach: properties.parameters">
     <li style="margin-bottom: 3px">
-      <input type="text" class="filechooser-input seventy" data-bind="value: value, filechooser: value, filechooserOptions: globalFilechooserOptions, filechooserPrefixSeparator: '=', hdfsAutocomplete: value, attr: { placeholder: ' ${ _ko("Fill me up!") }' }, typeahead: { target: value, source: $parent.actionParametersUI, sourceSuffix: '=', triggerOnFocus: true }"  validate="nonempty"/>
+      <input type="text" class="filechooser-input seventy" data-bind="value: value, filechooser: value, filechooserOptions: globalFilechooserOptions, filechooserPrefixSeparator: '=', hdfsAutocomplete: value, attr: { placeholder: ' ${ _ko("Fill me up!") }' + ' e.g. limit=${'${'}n}' }, typeahead: { target: value, source: $parent.actionParametersUI, sourceSuffix: '=', triggerOnFocus: true }"  validate="nonempty"/>
       <span data-bind='template: { name: "param-fs-link", data: {path: value()} }'></span>
       <a href="#" data-bind="click: function(){ $parent.properties.parameters.remove(this); $(document).trigger('drawArrows') }">
         <i class="fa fa-minus"></i>
@@ -840,16 +843,25 @@
             ${ _('Arguments') } <i class="fa fa-plus"></i>
           </a>
         </h6>
-        <ul class="unstyled" data-bind="visible: properties.spark_arguments().length > 0, foreach: properties.spark_arguments">
-          <li>
-            <input type="text" class="input-xlarge filechooser-input seventy" data-bind="filechooser: value, filechooserOptions: globalFilechooserOptions, hdfsAutocomplete: value, attr: { placeholder:  $root.workflow_properties.spark_arguments.help_text }" validate="nonempty"/>
-            <span data-bind='template: { name: "common-fs-link", data: {path: value, with_label: false}}'></span>
-            <a href="#" data-bind="click: function(){ $parent.properties.spark_arguments.remove(this); $(document).trigger('drawArrows') }">
-              <i class="fa fa-minus"></i>
-            </a>
-          </li>
-       </ul>
-       <em data-bind="visible: properties.spark_arguments().length == 0">${ _('No arguments defined.') }</em>
+
+        <div class="row-fluid">
+          <div>
+            <ul class="unstyled white sortable-arguments" data-bind="visible: properties.spark_arguments().length > 0, sortable: { data: properties.spark_arguments, options: { axis: 'y', containment: 'parent' }}">
+              <li>
+                <span class="muted move-widget">
+                  <i class="fa fa-arrows"></i>
+                </span>
+                <input type="text" class="input-xlarge filechooser-input seventy" data-bind="filechooser: value, filechooserOptions: globalFilechooserOptions, hdfsAutocomplete: value, attr: { placeholder:  $root.workflow_properties.spark_arguments.help_text }" validate="nonempty"/>
+                <span data-bind='template: { name: "common-fs-link", data: {path: value, with_label: false}}'></span>
+                <a href="#" data-bind="click: function(){ $parent.properties.spark_arguments.remove(this); $(document).trigger('drawArrows') }">
+                  <i class="fa fa-minus"></i>
+                </a>
+              </li>
+            </ul>
+            <em data-bind="visible: properties.spark_arguments().length == 0">${ _('No arguments defined.') }</em>
+          </div>
+          <div class="span6" data-bind="template: { name: 'common-properties-files' }"></div>
+        </div>
       </div>
     </div>
 
@@ -926,6 +938,164 @@
         </div>
       </div>
     </div>
+  </div>
+  <!-- /ko -->
+</script>
+
+
+<script type="text/html" id="hive-document-widget">
+  <!-- ko if: $root.workflow.getNodeById(id()) -->
+  <div class="row-fluid" data-bind="with: $root.workflow.getNodeById(id())" style="padding: 10px">
+
+    <div data-bind="visible: ! $root.isEditing()">
+      <span data-bind="template: { name: 'logs-icon' }"></span>
+      <!-- ko if: $root.getDocumentById(type(), properties.uuid()) -->
+      <!-- ko with: $root.getDocumentById(type(), properties.uuid()) -->
+        <a data-bind="attr: { href: absoluteUrl() }" target="_blank"><span data-bind='text: name'></span></a>
+        <br/>
+        <span data-bind='text: description' class="muted"></span>
+      <!-- /ko -->
+      <!-- /ko -->
+    </div>
+
+    <div data-bind="visible: $root.isEditing">
+      <div data-bind="visible: ! $parent.ooziePropertiesExpanded()" class="nowrap">
+        <!-- ko if: $root.getDocumentById(type(), properties.uuid()) -->
+        <!-- ko with: $root.getDocumentById(type(), properties.uuid()) -->
+          <select data-bind="options: $root.hiveQueries, optionsText: 'name', optionsValue: 'uuid', value: $parent.properties.uuid, select2Version4:{ placeholder: '${ _ko('Hive query name...')}'}"></select>
+          <a href="#" data-bind="attr: { href: absoluteUrl() }" target="_blank" title="${ _('Open') }">
+            <i class="fa fa-external-link-square"></i>
+          </a>
+          <div data-bind='text: description' style="padding: 3px; margin-top: 2px" class="muted"></div>
+        <!-- /ko -->
+        <!-- /ko -->
+
+        <div class="row-fluid">
+          <div class="span6" data-bind="template: { name: 'common-properties-parameters' }"></div>
+          <div class="span6" data-bind="template: { name: 'common-properties-files' }"></div>
+        </div>
+      </div>
+    </div>
+
+    <div data-bind="visible: $parent.ooziePropertiesExpanded">
+      <ul class="nav nav-tabs">
+        <li class="active"><a data-bind="attr: { href: '#properties-' + id()}" data-toggle="tab">${ _('Properties') }</a></li>
+        <li><a data-bind="attr: { href: '#sla-' + id()}" href="#sla" data-toggle="tab">${ _('SLA') }</a></li>
+        <li><a data-bind="attr: { href: '#credentials-' + id()}" data-toggle="tab">${ _('Credentials') }</a></li>
+        <li><a data-bind="attr: { href: '#transitions-' + id()}" data-toggle="tab">${ _('Transitions') }</a></li>
+      </ul>
+      <div class="tab-content">
+        <div class="tab-pane active" data-bind="attr: { id: 'properties-' + id() }">
+          <span data-bind="text: $root.workflow_properties.jdbc_url.label"></span>
+          <input type="text" data-bind="value: properties.jdbc_url, attr: { placeholder: $root.workflow_properties.jdbc_url.help_text }" />
+          <br/>
+          <span data-bind="text: $root.workflow_properties.password.label"></span>
+          <input type="text" data-bind="value: properties.password, attr: { placeholder: $root.workflow_properties.password.help_text }" />
+          <br/>
+          <span data-bind="template: { name: 'common-action-properties' }"></span>
+          <br/>
+          <br/>
+        </div>
+
+        <div class="tab-pane" data-bind="attr: { id: 'sla-' + id() }">
+          <span data-bind="template: { name: 'common-action-sla' }"></span>
+        </div>
+
+        <div class="tab-pane" data-bind="attr: { id: 'credentials-' + id() }">
+          <span data-bind="template: { name: 'common-action-credentials' }"></span>
+        </div>
+
+        <div class="tab-pane" data-bind="attr: { id: 'transitions-' + id() }">
+          <span data-bind="template: { name: 'common-action-transition' }"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+  <!-- /ko -->
+</script>
+
+
+<script type="text/html" id="java-document-widget">
+  <!-- ko if: $root.workflow.getNodeById(id()) -->
+  <div class="row-fluid" data-bind="with: $root.workflow.getNodeById(id())" style="padding: 10px">
+
+    <div data-bind="visible: ! $root.isEditing()">
+      <span data-bind="template: { name: 'logs-icon' }"></span>
+      <!-- ko if: $root.getDocumentById(type(), properties.uuid()) -->
+      <!-- ko with: $root.getDocumentById(type(), properties.uuid()) -->
+        <a data-bind="attr: { href: absoluteUrl() }" target="_blank"><span data-bind='text: name'></span></a>
+        <br/>
+        <span data-bind='text: description' class="muted"></span>
+      <!-- /ko -->
+      <!-- /ko -->
+    </div>
+
+    <div data-bind="visible: $root.isEditing">
+      <div data-bind="visible: ! $parent.ooziePropertiesExpanded()" class="nowrap">
+        <!-- ko if: $root.getDocumentById(type(), properties.uuid()) -->
+        <!-- ko with: $root.getDocumentById(type(), properties.uuid()) -->
+          <select data-bind="options: $root.javaQueries, optionsText: 'name', optionsValue: 'uuid', value: $parent.properties.uuid, select2Version4:{ placeholder: '${ _ko('Java program name...')}'}"></select>
+          <a href="#" data-bind="attr: { href: absoluteUrl() }" target="_blank" title="${ _('Open') }">
+            <i class="fa fa-external-link-square"></i>
+          </a>
+          <div data-bind='text: description' style="padding: 3px; margin-top: 2px" class="muted"></div>
+        <!-- /ko -->
+        <!-- /ko -->
+
+        <div class="row-fluid">
+          <div class="span6" data-bind="template: { name: 'common-properties-parameters' }"></div>
+          <div class="span6" data-bind="template: { name: 'common-properties-files' }"></div>
+        </div>
+      </div>
+    </div>
+
+    <div data-bind="visible: $parent.ooziePropertiesExpanded">
+      <ul class="nav nav-tabs">
+        <li class="active"><a data-bind="attr: { href: '#properties-' + id()}" data-toggle="tab">${ _('Properties') }</a></li>
+        <li><a data-bind="attr: { href: '#sla-' + id()}" href="#sla" data-toggle="tab">${ _('SLA') }</a></li>
+        <li><a data-bind="attr: { href: '#credentials-' + id()}" data-toggle="tab">${ _('Credentials') }</a></li>
+        <li><a data-bind="attr: { href: '#transitions-' + id()}" data-toggle="tab">${ _('Transitions') }</a></li>
+      </ul>
+      <div class="tab-content">
+        <div class="tab-pane active" data-bind="attr: { id: 'properties-' + id() }">
+          <h6>
+            <a class="pointer" data-bind="click: function(){ properties.java_opts.push({'value': ''}); }">
+              <span data-bind="text: $root.workflow_properties.java_opts.label"></span> <i class="fa fa-plus"></i>
+            </a>
+          </h6>
+          <ul class="unstyled" data-bind="foreach: properties.java_opts">
+            <li>
+              <input type="text" data-bind="value: value, attr: { placeholder: $root.workflow_properties.java_opts.help_text }" class="input-xlarge"/>
+              <a href="#" data-bind="click: function(){ $parent.properties.java_opts.remove(this); }">
+                <i class="fa fa-minus"></i>
+              </a>
+            </li>
+          </ul>
+
+          <span data-bind="text: $root.workflow_properties.capture_output.label"></span>
+          <input type="checkbox" data-bind="checked: properties.capture_output" />
+          <br/>
+          <br/>
+
+          <span data-bind="template: { name: 'common-action-properties' }"></span>
+          <br/>
+        </div>
+
+        <div class="tab-pane" data-bind="attr: { id: 'sla-' + id() }">
+          <span data-bind="template: { name: 'common-action-sla' }"></span>
+        </div>
+
+        <div class="tab-pane" data-bind="attr: { id: 'credentials-' + id() }">
+          <span data-bind="template: { name: 'common-action-credentials' }"></span>
+        </div>
+
+        <div class="tab-pane" data-bind="attr: { id: 'transitions-' + id() }">
+          <span data-bind="template: { name: 'common-action-transition' }"></span>
+        </div>
+      </div>
+    </div>
+  </div>
   </div>
   <!-- /ko -->
 </script>
@@ -1724,8 +1894,11 @@
             <span data-bind="text: $root.workflow_properties.distcp_parameters.label"></span> <i class="fa fa-plus"></i>
           </a>
         </h6>
-        <ul data-bind="foreach: properties.distcp_parameters" class="unstyled">
+        <ul class="unstyled white sortable-arguments" data-bind="sortable: { data: properties.distcp_parameters, options: { axis: 'y', containment: 'parent' }}">
           <li>
+            <span class="muted move-widget">
+              <i class="fa fa-arrows"></i>
+            </span>
             <input type="text" class="input-xlarge filechooser-input seventy" data-bind="filechooser: value, filechooserOptions: globalFilechooserOptions, hdfsAutocomplete: value, value: value, attr: { placeholder: $root.workflow_properties.distcp_parameters.help_text }" validate="nonempty"/>
             <span data-bind='template: { name: "common-fs-link", data: {path: value(), with_label: false} }, visible: value().length > 0'></span>
             <a href="#" data-bind="click: function(){ $parent.properties.distcp_parameters.remove(this);  }">
@@ -1817,5 +1990,3 @@
 </script>
 
 </%def>
-
-

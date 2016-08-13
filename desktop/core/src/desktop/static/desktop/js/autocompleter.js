@@ -18,37 +18,53 @@
   if(typeof define === "function" && define.amd) {
     define([
       'desktop/js/sqlAutocompleter',
+      'desktop/js/sqlAutocompleter2',
       'desktop/js/hdfsAutocompleter'
     ], factory);
   } else {
-    root.Autocompleter = factory(SqlAutocompleter, HdfsAutocompleter);
+    root.Autocompleter = factory(SqlAutocompleter, SqlAutocompleter2, HdfsAutocompleter);
   }
-}(this, function (SqlAutocompleter, HdfsAutocompleter) {
+}(this, function (SqlAutocompleter, SqlAutocompleter2, HdfsAutocompleter) {
 
   /**
-   * @param options {object}
+   * @param {Object} options {object}
    * @param options.snippet
    * @param options.user
-   *
+   * @param options.optEnabled
+   * @param {Number} options.timeout
+   * @param options.useNewSqlAutocompleter {boolean}
    * @constructor
    */
   function Autocompleter(options) {
     var self = this;
     self.snippet = options.snippet;
+    self.timeout = options.timeout;
+    
+    self.topTables = {};
 
     var initializeAutocompleter = function () {
-      var hdfsAutocompleter = new HdfsAutocompleter({
-        user: options.user,
-        snippet: options.snippet
-      });
-      if (self.snippet.isSqlDialect()) {
-        self.autocompleter = new SqlAutocompleter({
-          hdfsAutocompleter: hdfsAutocompleter,
-          snippet: options.snippet,
-          oldEditor: options.oldEditor
-        })
+      if (self.snippet.isSqlDialect() && options.useNewAutocompleter) {
+        self.autocompleter = new SqlAutocompleter2({
+          snippet: self.snippet,
+          timeout: self.timeout
+        });
       } else {
-        self.autocompleter = hdfsAutocompleter;
+        var hdfsAutocompleter = new HdfsAutocompleter({
+          user: options.user,
+          snippet: options.snippet,
+          timeout: options.timeout
+        });
+        if (self.snippet.isSqlDialect()) {
+          self.autocompleter = new SqlAutocompleter({
+            hdfsAutocompleter: hdfsAutocompleter,
+            snippet: options.snippet,
+            oldEditor: options.oldEditor,
+            optEnabled: options.optEnabled,
+            timeout: self.timeout
+          })
+        } else {
+          self.autocompleter = hdfsAutocompleter;
+        }
       }
     };
     self.snippet.type.subscribe(function () {
@@ -57,6 +73,7 @@
     initializeAutocompleter();
   }
 
+  // TODO: See why we need this one.
   Autocompleter.prototype.initializeAutocompleter = function () {
     var self = this;
   };
@@ -75,6 +92,12 @@
       callback(null, result);
     }, editor);
   };
+
+  Autocompleter.prototype.getDocTooltip = function (item) {
+    var self = this;
+    return self.autocompleter.getDocTooltip(item);
+  };
+
 
   Autocompleter.prototype.autocomplete = function(beforeCursor, afterCursor, callback, editor) {
     var self = this;

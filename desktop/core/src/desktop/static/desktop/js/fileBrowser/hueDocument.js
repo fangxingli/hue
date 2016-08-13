@@ -27,7 +27,7 @@
   /**
    *
    * @param {Object} options
-   * @param {AssistHelper} options.assistHelper
+   * @param {ApiHelper} options.apiHelper
    * @param {HueFileEntry} options.fileEntry
    *
    * @constructor
@@ -35,7 +35,7 @@
   function HueDocument (options) {
     var self = this;
     self.fileEntry = options.fileEntry;
-    self.assistHelper = options.assistHelper;
+    self.apiHelper = options.apiHelper;
     self.definition = ko.observable();
     self.loaded = ko.observable(false);
     self.loading = ko.observable(false);
@@ -71,7 +71,11 @@
           process(dropdown);
         },
         matcher: function (item) {
-          if (item.toLowerCase().indexOf(this.query.trim().toLowerCase()) != -1) {
+          if (item.toLowerCase() === this.query.trim().toLowerCase()) {
+            self.selectedUserOrGroup(usermap[item] ? usermap[item] : groupmap[item]);
+            return true;
+          } else if (item.toLowerCase().indexOf(this.query.trim().toLowerCase()) != -1) {
+            self.selectedUserOrGroup(undefined);
             return true;
           }
         },
@@ -164,7 +168,7 @@
     self.hasErrors(false);
 
     var fetchFunction = function () {
-      self.assistHelper.fetchDocument({
+      self.apiHelper.fetchDocument({
         uuid: self.fileEntry.definition().uuid,
         successCallback: function (data) {
           self.prettifyUserNames(data.document.perms.write.users);
@@ -223,12 +227,12 @@
 
   HueDocument.prototype.removeGroupReadShare = function (group) {
     var self = this;
-    self.updateSharePerm(self.definition().perms.read.groups, group.id);
+    self.removeFromPerms(self.definition().perms.read.groups, group.id);
   };
 
   HueDocument.prototype.removeGroupWriteShare = function (group) {
     var self = this;
-    self.updateSharePerm(self.definition().perms.write.groups, group.id);
+    self.removeFromPerms(self.definition().perms.write.groups, group.id);
   };
 
   return HueDocument;

@@ -23,6 +23,8 @@ from django.forms.formsets import formset_factory
 from django.shortcuts import redirect
 from django.utils.translation import ugettext as _
 
+from desktop.conf import USE_NEW_EDITOR
+from desktop.lib import django_mako
 from desktop.lib.django_util import JsonResponse, render
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.i18n import smart_str
@@ -33,12 +35,15 @@ from desktop.models import Document, Document2
 from liboozie.credentials import Credentials
 from liboozie.oozie_api import get_oozie
 from liboozie.submission2 import Submission
+from notebook.connectors.base import Notebook
 
-from oozie.decorators import check_document_access_permission, check_document_modify_permission
+from oozie.decorators import check_document_access_permission, check_document_modify_permission,\
+  check_editor_access_permission
 from oozie.forms import ParameterForm
 from oozie.models import Workflow as OldWorklow, Coordinator as OldCoordinator, Bundle as OldBundle, Job
 from oozie.models2 import Node, Workflow, Coordinator, Bundle, NODES, WORKFLOW_NODE_PROPERTIES, import_workflow_from_hue_3_7,\
-    find_dollar_variables, find_dollar_braced_variables
+    find_dollar_variables, find_dollar_braced_variables, WorkflowBuilder,\
+  _import_workspace, _save_workflow
 from oozie.utils import convert_to_server_timezone
 from oozie.views.editor import edit_workflow as old_edit_workflow, edit_coordinator as old_edit_coordinator, edit_bundle as old_edit_bundle
 
@@ -46,9 +51,13 @@ from oozie.views.editor import edit_workflow as old_edit_workflow, edit_coordina
 LOG = logging.getLogger(__name__)
 
 
-
+@check_editor_access_permission
 def list_editor_workflows(request):
-  workflows = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, extra='workflow2')]
+  if USE_NEW_EDITOR.get():
+    docs = Document2.objects.documents(user=request.user).search_documents(types=['oozie-workflow2'])
+    workflows = [doc.to_dict() for doc in docs]
+  else:
+    workflows = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, extra='workflow2')]
 
   workflows_v1 = [job.doc.get().to_dict() for job in Document.objects.available(OldWorklow, request.user) if job.managed]
   if workflows_v1:
@@ -59,6 +68,7 @@ def list_editor_workflows(request):
   })
 
 
+@check_editor_access_permission
 def open_old_workflow(request):
   doc_id = request.GET.get('workflow')
   workflow = Document.objects.get(id=doc_id).content_object.get_full_node()
@@ -71,6 +81,7 @@ def open_old_workflow(request):
     return old_edit_workflow(request, workflow=workflow.id)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def edit_workflow(request):
   workflow_id = request.GET.get('workflow')
@@ -102,11 +113,11 @@ def _edit_workflow(request, doc, workflow):
       'workflow_json': json.dumps(workflow_data['workflow'], cls=JSONEncoderForHTML),
       'credentials_json': json.dumps(credentials.credentials.keys(), cls=JSONEncoderForHTML),
       'workflow_properties_json': json.dumps(WORKFLOW_NODE_PROPERTIES, cls=JSONEncoderForHTML),
-      'doc1_id': doc.doc.get().id if doc else -1,
+      'doc_uuid': doc.uuid if doc else '',
       'subworkflows_json': json.dumps(_get_workflows(request.user), cls=JSONEncoderForHTML),
       'can_edit_json': json.dumps(doc is None or doc.doc.get().is_editable(request.user)),
       'history_json': json.dumps([{
-          'history': hist.data_dict.get('history', '{}'),
+          'history': hist.data_dict.get('history', {}),
           'id': hist.id,
           'expanded': False,
           'date': hist.last_modified.strftime('%Y-%m-%dT%H:%M')
@@ -114,15 +125,17 @@ def _edit_workflow(request, doc, workflow):
   })
 
 
+@check_editor_access_permission
 def new_workflow(request):
   doc = None
-  workflow = Workflow()
+  workflow = Workflow(user=request.user)
   workflow.set_workspace(request.user)
   workflow.check_workspace(request.fs, request.user)
 
   return _edit_workflow(request, doc, workflow)
 
 
+@check_editor_access_permission
 def delete_job(request):
   if request.method != 'POST':
     raise PopupException(_('A POST request is required.'))
@@ -132,11 +145,15 @@ def delete_job(request):
   for job in jobs:
     if job.get('uuid'):
       doc2 = Document2.objects.get(id=job['id'])
-      doc = doc2.doc.get()
-      doc.can_write_or_exception(request.user)
-
-      doc.delete()
-      doc2.delete()
+      if USE_NEW_EDITOR.get():
+        doc2 = Document2.objects.get(id=job['id'])
+        doc2.can_write_or_exception(request.user)
+        doc2.trash()
+      else:
+        doc = doc2.doc.get()
+        doc.can_write_or_exception(request.user)
+        doc.delete()
+        doc2.delete()
     else: # Old version
       job = Job.objects.can_read_or_exception(request, job['object_id'])
       Job.objects.can_edit_or_exception(request, job)
@@ -148,6 +165,7 @@ def delete_job(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def copy_workflow(request):
   if request.method != 'POST':
@@ -178,14 +196,7 @@ def copy_workflow(request):
   return JsonResponse(response)
 
 
-def _import_workspace(fs, user, workflow):
-  source_workspace_dir = workflow.deployment_dir
-
-  workflow.set_workspace(user)
-  workflow.check_workspace(fs, user)
-  workflow.import_workspace(fs, source_workspace_dir, user)
-
-
+@check_editor_access_permission
 @check_document_modify_permission()
 def save_workflow(request):
   response = {'status': -1}
@@ -193,42 +204,23 @@ def save_workflow(request):
   workflow = json.loads(request.POST.get('workflow', '{}'))
   layout = json.loads(request.POST.get('layout', '{}'))
 
-  if workflow.get('id'):
-    workflow_doc = Document2.objects.get(id=workflow['id'])
-  else:
-    workflow_doc = Document2.objects.create(name=workflow['name'], uuid=workflow['uuid'], type='oozie-workflow2', owner=request.user, description=workflow['properties']['description'])
-    Document.objects.link(workflow_doc, owner=workflow_doc.owner, name=workflow_doc.name, description=workflow_doc.description, extra='workflow2')
+  is_imported = workflow['properties'].get('imported')
 
-  subworkflows = [node['properties']['workflow'] for node in workflow['nodes'] if node['type'] == 'subworkflow-widget']
-  if subworkflows:
-    dependencies = Document2.objects.filter(uuid__in=subworkflows)
-    workflow_doc.dependencies = dependencies
-  else:
-    workflow_doc.dependencies = []
+  workflow_doc = _save_workflow(workflow, layout, request.user)
 
-  if workflow['properties'].get('imported'): # We save and old format workflow to the latest
-    workflow['properties']['imported'] = False
-    workflow_instance = Workflow(workflow=workflow)
-    _import_workspace(request.fs, request.user, workflow_instance)
-    workflow['properties']['deployment_dir'] = workflow_instance.deployment_dir
+  # For old workflow import
+  if is_imported:
     response['url'] = reverse('oozie:edit_workflow') + '?workflow=' + str(workflow_doc.id)
-
-  workflow_doc.update_data({'workflow': workflow})
-  workflow_doc.update_data({'layout': layout})
-  workflow_doc1 = workflow_doc.doc.get()
-  workflow_doc.name = workflow_doc1.name = workflow['name']
-  workflow_doc.description = workflow_doc1.description = workflow['properties']['description']
-  workflow_doc.save()
-  workflow_doc1.save()
 
   response['status'] = 0
   response['id'] = workflow_doc.id
-  response['doc1_id'] = workflow_doc1.id
+  response['doc_uuid'] = workflow_doc.uuid
   response['message'] = _('Page saved !')
 
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 def new_node(request):
   response = {'status': -1}
 
@@ -248,15 +240,25 @@ def new_node(request):
 
 
 def _get_workflows(user):
-  return [{
-        'name': workflow.name,
-        'owner': workflow.owner.username,
-        'value': workflow.uuid,
-        'id': workflow.id
-      } for workflow in [d.content_object for d in Document.objects.get_docs(user, Document2, extra='workflow2').order_by('-id')]
+  if USE_NEW_EDITOR.get():
+    workflows = [{
+          'name': workflow.name,
+          'owner': workflow.owner.username,
+          'value': workflow.uuid,
+          'id': workflow.id
+        } for workflow in [doc for doc in Document2.objects.documents(user).search_documents(types=['oozie-workflow2']).order_by('-id')]
+      ]
+  else:
+    workflows = [{
+          'name': workflow.name,
+          'owner': workflow.owner.username,
+          'value': workflow.uuid,
+          'id': workflow.id
+        } for workflow in [d.content_object for d in Document.objects.get_docs(user, Document2, extra='workflow2').order_by('-id')]
     ]
+  return workflows
 
-
+@check_editor_access_permission
 def add_node(request):
   response = {'status': -1}
 
@@ -277,6 +279,7 @@ def add_node(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 def action_parameters(request):
   response = {'status': -1}
   parameters = set()
@@ -297,6 +300,9 @@ def action_parameters(request):
           parameters = parameters.union(set(find_dollar_braced_variables(data)))
         elif node_data['type'] == 'pig':
           parameters = parameters.union(set(find_dollar_variables(data)))
+    elif node_data['type'] == 'hive-document':
+      notebook = Notebook(document=Document2.objects.get_by_uuid(user=request.user, uuid=node_data['properties']['uuid']))
+      parameters = parameters.union(set(find_dollar_braced_variables(notebook.get_str())))
 
     response['status'] = 0
     response['parameters'] = list(parameters)
@@ -306,12 +312,14 @@ def action_parameters(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def workflow_parameters(request):
   response = {'status': -1}
 
   try:
-    workflow = Workflow(document=Document2.objects.get(type='oozie-workflow2', uuid=request.GET.get('uuid')))
+    workflow_doc = Document2.objects.get(type='oozie-workflow2', uuid=request.GET.get('uuid'))
+    workflow = Workflow(document=workflow_doc, user=request.user)
 
     response['status'] = 0
     response['parameters'] = workflow.find_all_parameters(with_lib_path=False)
@@ -321,13 +329,49 @@ def workflow_parameters(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
+@check_document_access_permission()
+def refresh_action_parameters(request):
+  response = {'status': -1}
+
+  try:
+    coord_uuid = request.POST.get('uuid')
+    workflow_doc = Document2.objects.get(type='oozie-workflow2', owner=request.user, is_managed=True, dependents__uuid__in=[coord_uuid])
+
+    # Refresh the action parameters of a document action in case the document changed
+    workflow = Workflow(document=workflow_doc, user=request.user)
+
+    _data = workflow.get_data()
+    hive_node = _data['workflow']['nodes'][3]
+    query_document = Document2.objects.get_by_uuid(user=request.user, uuid=hive_node['properties']['uuid'])
+    parameters = WorkflowBuilder().get_document_parameters(query_document)
+
+    changed = set([p['value'] for p in parameters]) != set([p['value'] for p in hive_node['properties']['parameters']])
+
+    if changed:
+      hive_node['properties']['parameters'] = parameters
+      workflow.data = json.dumps(_data)
+
+      workflow_doc.update_data({'workflow': _data['workflow']})
+      workflow_doc.save()
+
+    response['status'] = 0
+    response['parameters'] = parameters
+    response['changed'] = changed
+  except Exception, e:
+    response['message'] = str(e)
+
+  return JsonResponse(response)
+
+
+@check_editor_access_permission
 def gen_xml_workflow(request):
   response = {'status': -1}
 
   try:
     workflow_json = json.loads(request.POST.get('workflow', '{}'))
 
-    workflow = Workflow(workflow=workflow_json)
+    workflow = Workflow(workflow=workflow_json, user=request.user)
 
     response['status'] = 0
     response['xml'] = workflow.to_xml()
@@ -337,6 +381,7 @@ def gen_xml_workflow(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def submit_workflow(request, doc_id):
   workflow = Workflow(document=Document2.objects.get(id=doc_id))
@@ -344,6 +389,7 @@ def submit_workflow(request, doc_id):
   return _submit_workflow_helper(request, workflow, submit_action=reverse('oozie:editor_submit_workflow', kwargs={'doc_id': workflow.id}))
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def submit_single_action(request, doc_id, node_id):
   parent_doc = Document2.objects.get(id=doc_id)
@@ -409,12 +455,14 @@ def _submit_workflow(user, fs, jt, workflow, mapping):
     LOG.exception('Error submitting workflow: %s' % smart_str(detail))
     raise PopupException(_("Error submitting workflow %s: %s") % (workflow, detail))
 
-  return redirect(reverse('oozie:list_oozie_workflow', kwargs={'job_id': job_id}))
 
-
-
+@check_editor_access_permission
 def list_editor_coordinators(request):
-  coordinators = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, extra='coordinator2')]
+  if USE_NEW_EDITOR.get():
+    docs = Document2.objects.documents(user=request.user).search_documents(types=['oozie-coordinator2'])
+    coordinators = [doc.to_dict() for doc in docs]
+  else:
+    coordinators = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, extra='coordinator2')]
 
   coordinators_v1 = [job.doc.get().to_dict() for job in Document.objects.available(OldCoordinator, request.user)]
   if coordinators_v1:
@@ -425,10 +473,12 @@ def list_editor_coordinators(request):
   })
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def edit_coordinator(request):
   coordinator_id = request.GET.get('coordinator', request.GET.get('uuid'))
   doc = None
+  workflow_uuid = None
 
   if coordinator_id:
     cid = {}
@@ -442,7 +492,24 @@ def edit_coordinator(request):
     coordinator = Coordinator()
     coordinator.set_workspace(request.user)
 
-  workflow_uuid = request.GET.get('workflow')
+  # Automatically create the workflow of a scheduled document
+  # To move to save coordinator
+  document_uuid = request.GET.get('document')
+  if document_uuid:
+    # Has already a workflow managing the query for this user?
+    workflows = Document2.objects.filter(type='oozie-workflow2', owner=request.user, is_managed=True, dependencies__uuid__in=[document_uuid])
+    if workflows.exists():
+      workflow_doc = workflows.get()
+    else:
+      document = Document2.objects.get_by_uuid(user=request.user, uuid=document_uuid)
+      workflow_doc = WorkflowBuilder().create_workflow(document=document, user=request.user, managed=True)
+      if doc:
+        doc.dependencies.add(workflow_doc)
+    workflow_uuid = workflow_doc.uuid
+    coordinator.data['name'] = _('Schedule of %s') % workflow_doc.name
+  elif request.GET.get('workflow'):
+    workflow_uuid = request.GET.get('workflow')
+
   if workflow_uuid:
     coordinator.data['properties']['workflow'] = workflow_uuid
 
@@ -454,25 +521,45 @@ def edit_coordinator(request):
   except Exception, e:
     LOG.error(smart_str(e))
 
-  workflows = [dict([('uuid', d.content_object.uuid), ('name', d.content_object.name)])
-                    for d in Document.objects.available_docs(Document2, request.user).filter(extra='workflow2')]
+  if USE_NEW_EDITOR.get():
+    workflows = [dict([('uuid', d.uuid), ('name', d.name)])
+                      for d in Document2.objects.documents(request.user, include_managed=True).search_documents(types=['oozie-workflow2'])]
+  else:
+    workflows = [dict([('uuid', d.content_object.uuid), ('name', d.content_object.name)])
+                      for d in Document.objects.available_docs(Document2, request.user).filter(extra='workflow2')]
 
-  if coordinator_id and not filter(lambda a: a['uuid'] == coordinator.data['properties']['workflow'], workflows):
+  if coordinator_id and not filter(lambda a: a['uuid'] == coordinator.data['properties']['workflow'], workflows): # In Hue 4, use dependencies instead
     raise PopupException(_('You don\'t have access to the workflow of this coordinator.'))
 
-  return render('editor2/coordinator_editor.mako', request, {
+  if USE_NEW_EDITOR.get(): # In Hue 4, merge with above
+    workflows = [dict([('uuid', d.uuid), ('name', d.name)])
+                      for d in Document2.objects.documents(request.user, include_managed=False).search_documents(types=['oozie-workflow2'])]
+
+  if request.GET.get('format') == 'json': # For Editor
+    return JsonResponse({
+      'coordinator': coordinator.get_data_for_json(),
+      'credentials': credentials.credentials.keys(),
+      'workflows': workflows,
+      'doc_uuid': doc.uuid if doc else '',
+      'can_edit': doc is None or doc.doc.get().is_editable(request.user),
+      'layout': django_mako.render_to_string('editor2/common_scheduler.mako', {'coordinator_json': coordinator.to_json_for_html()})
+    })
+  else:
+    return render('editor2/coordinator_editor.mako', request, {
       'coordinator_json': coordinator.to_json_for_html(),
       'credentials_json': json.dumps(credentials.credentials.keys(), cls=JSONEncoderForHTML),
       'workflows_json': json.dumps(workflows, cls=JSONEncoderForHTML),
-      'doc1_id': doc.doc.get().id if doc else -1,
+      'doc_uuid': doc.uuid if doc else '',
       'can_edit_json': json.dumps(doc is None or doc.doc.get().is_editable(request.user))
   })
 
 
+@check_editor_access_permission
 def new_coordinator(request):
   return edit_coordinator(request)
 
 
+@check_editor_access_permission
 def open_old_coordinator(request):
   doc_id = request.GET.get('coordinator')
   coordinator_id = Document.objects.get(id=doc_id).object_id
@@ -480,6 +567,7 @@ def open_old_coordinator(request):
   return old_edit_coordinator(request, coordinator=coordinator_id)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def copy_coordinator(request):
   if request.method != 'POST':
@@ -496,8 +584,11 @@ def copy_coordinator(request):
 
     doc.copy(content_object=doc2, name=name, owner=request.user)
 
-    coordinator_data = Coordinator(document=doc2).get_data_for_json()
+    coord = Coordinator(document=doc2)
+    coordinator_data = coord.get_data_for_json()
     coordinator_data['name'] = name
+
+    _import_workspace(request.fs, request.user, coord)
     doc2.update_data(coordinator_data)
     doc2.save()
 
@@ -507,6 +598,7 @@ def copy_coordinator(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_modify_permission()
 def save_coordinator(request):
   response = {'status': -1}
@@ -516,14 +608,16 @@ def save_coordinator(request):
   if coordinator_data.get('id'):
     coordinator_doc = Document2.objects.get(id=coordinator_data['id'])
   else:
-    coordinator_doc = Document2.objects.create(name=coordinator_data['name'], uuid=coordinator_data['uuid'], type='oozie-coordinator2', owner=request.user)
+    coordinator_doc = Document2.objects.create(name=coordinator_data['name'], uuid=coordinator_data['uuid'], type='oozie-coordinator2', owner=request.user, is_managed=coordinator_data.get('isManaged'))
     Document.objects.link(coordinator_doc, owner=coordinator_doc.owner, name=coordinator_doc.name, description=coordinator_doc.description, extra='coordinator2')
 
   if coordinator_data['properties']['workflow']:
-    dependencies = Document2.objects.filter(type='oozie-workflow2', uuid=coordinator_data['properties']['workflow'])
-    for doc in dependencies:
-      doc.doc.get().can_read_or_exception(request.user)
-    coordinator_doc.dependencies = dependencies
+    workflow_doc = Document2.objects.get(type='oozie-workflow2', uuid=coordinator_data['properties']['workflow'])
+    workflow_doc.doc.get().can_read_or_exception(request.user)
+    coordinator_doc.dependencies = [workflow_doc]
+    scheduled_doc = workflow_doc.dependencies.filter(type__startswith='query-', owner=request.user, is_managed=False)
+    for action in scheduled_doc.all():
+      coordinator_doc.dependencies.add(action)
 
   coordinator_doc1 = coordinator_doc.doc.get()
   coordinator_doc.update_data(coordinator_data)
@@ -534,11 +628,13 @@ def save_coordinator(request):
 
   response['status'] = 0
   response['id'] = coordinator_doc.id
+  response['uuid'] = coordinator_doc.uuid
   response['message'] = _('Saved !')
 
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 def gen_xml_coordinator(request):
   response = {'status': -1}
 
@@ -552,6 +648,7 @@ def gen_xml_coordinator(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def coordinator_parameters(request):
   response = {'status': -1}
@@ -567,9 +664,14 @@ def coordinator_parameters(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def submit_coordinator(request, doc_id):
-  coordinator = Coordinator(document=Document2.objects.get(id=doc_id))
+  if doc_id.isdigit():
+    coordinator = Coordinator(document=Document2.objects.get(id=doc_id))
+  else:
+    coordinator = Coordinator(document=Document2.objects.get_by_uuid(user=request.user, uuid=doc_id))
+
   ParametersFormSet = formset_factory(ParameterForm, extra=0)
 
   if request.method == 'POST':
@@ -578,10 +680,13 @@ def submit_coordinator(request, doc_id):
     if params_form.is_valid():
       mapping = dict([(param['name'], param['value']) for param in params_form.cleaned_data])
       mapping['dryrun'] = request.POST.get('dryrun_checkbox') == 'on'
+      jsonify = request.POST.get('format') == 'json'
       job_id = _submit_coordinator(request, coordinator, mapping)
-
-      request.info(_('Coordinator submitted.'))
-      return redirect(reverse('oozie:list_oozie_coordinator', kwargs={'job_id': job_id}))
+      if jsonify:
+        return JsonResponse({'status': 0, 'job_id': job_id}, safe=False)
+      else:
+        request.info(_('Coordinator submitted.'))
+        return redirect(reverse('oozie:list_oozie_coordinator', kwargs={'job_id': job_id}))
     else:
       request.error(_('Invalid submission form: %s' % params_form.errors))
   else:
@@ -593,14 +698,15 @@ def submit_coordinator(request, doc_id):
                  'params_form': params_form,
                  'name': coordinator.name,
                  'action': reverse('oozie:editor_submit_coordinator',  kwargs={'doc_id': coordinator.id}),
-                 'show_dryrun': True
+                 'show_dryrun': True,
+                 'return_json': request.GET.get('format') == 'json'
                 }, force_template=True).content
   return JsonResponse(popup, safe=False)
 
 
 def _submit_coordinator(request, coordinator, mapping):
   try:
-    wf_doc = Document2.objects.get_by_uuid(uuid=coordinator.data['properties']['workflow'])
+    wf_doc = Document2.objects.get_by_uuid(user=request.user, uuid=coordinator.data['properties']['workflow'])
     wf_dir = Submission(request.user, Workflow(document=wf_doc), request.fs, request.jt, mapping, local_tz=coordinator.data['properties']['timezone']).deploy()
 
     properties = {'wf_application_path': request.fs.get_hdfs_path(wf_dir)}
@@ -615,8 +721,13 @@ def _submit_coordinator(request, coordinator, mapping):
     raise PopupException(_("Error submitting coordinator %s") % (coordinator,), detail=ex._headers.get('oozie-error-message', ex))
 
 
+@check_editor_access_permission
 def list_editor_bundles(request):
-  bundles = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, extra='bundle2')]
+  if USE_NEW_EDITOR.get():
+    docs = Document2.objects.documents(request.user).search_documents(types=['oozie-bundle2'])
+    bundles = [doc.to_dict() for doc in docs]
+  else:
+    bundles = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, extra='bundle2')]
 
   bundles_v1 = [job.doc.get().to_dict() for job in Document.objects.available(OldBundle, request.user)]
   if bundles_v1:
@@ -627,6 +738,7 @@ def list_editor_bundles(request):
   })
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def edit_bundle(request):
   bundle_id = request.GET.get('bundle')
@@ -639,21 +751,27 @@ def edit_bundle(request):
     bundle = Bundle()
     bundle.set_workspace(request.user)
 
-  coordinators = [dict([('id', d.content_object.id), ('uuid', d.content_object.uuid), ('name', d.content_object.name)])
+  if USE_NEW_EDITOR.get():
+    coordinators = [dict([('id', d.id), ('uuid', d.uuid), ('name', d.name)])
+                      for d in Document2.objects.documents(request.user).search_documents(types=['oozie-coordinator2'])]
+  else:
+    coordinators = [dict([('id', d.content_object.id), ('uuid', d.content_object.uuid), ('name', d.content_object.name)])
                       for d in Document.objects.get_docs(request.user, Document2, extra='coordinator2')]
 
   return render('editor2/bundle_editor.mako', request, {
       'bundle_json': bundle.to_json_for_html(),
       'coordinators_json': json.dumps(coordinators, cls=JSONEncoderForHTML),
-      'doc1_id': doc.doc.get().id if doc else -1,
+      'doc_uuid': doc.uuid if doc else '',
       'can_edit_json': json.dumps(doc is None or doc.doc.get().is_editable(request.user))
   })
 
 
+@check_editor_access_permission
 def new_bundle(request):
   return edit_bundle(request)
 
 
+@check_editor_access_permission
 def open_old_bundle(request):
   doc_id = request.GET.get('bundle')
   bundle_id = Document.objects.get(id=doc_id).object_id
@@ -661,6 +779,7 @@ def open_old_bundle(request):
   return old_edit_bundle(request, bundle=bundle_id)
 
 
+@check_editor_access_permission
 @check_document_modify_permission()
 def save_bundle(request):
   response = {'status': -1}
@@ -693,6 +812,7 @@ def save_bundle(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def copy_bundle(request):
   if request.method != 'POST':
@@ -709,8 +829,11 @@ def copy_bundle(request):
 
     doc.copy(content_object=doc2, name=name, owner=request.user)
 
-    bundle_data = Bundle(document=doc2).get_data_for_json()
+    bundle = Bundle(document=doc2)
+    bundle_data = bundle.get_data_for_json()
     bundle_data['name'] = name
+
+    _import_workspace(request.fs, request.user, bundle)
     doc2.update_data(bundle_data)
     doc2.save()
 
@@ -720,6 +843,7 @@ def copy_bundle(request):
   return JsonResponse(response)
 
 
+@check_editor_access_permission
 @check_document_access_permission()
 def submit_bundle(request, doc_id):
   bundle = Bundle(document=Document2.objects.get(id=doc_id))
@@ -780,4 +904,3 @@ def _submit_bundle(request, bundle, properties):
   except RestException, ex:
     LOG.exception('Error submitting bundle')
     raise PopupException(_("Error submitting bundle %s") % (bundle,), detail=ex._headers.get('oozie-error-message', ex))
-

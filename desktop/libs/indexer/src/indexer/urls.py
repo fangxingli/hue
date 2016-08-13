@@ -23,10 +23,14 @@ urlpatterns = patterns('indexer.views',
   
   # V2
   url(r'^indexes/$', 'indexes', name='indexes'),
+
+  # V3
+  url(r'^indexer/$', 'indexer', name='indexer')
 )
 
 urlpatterns += patterns('indexer.api',
   url(r'^api/fields/parse/$', 'parse_fields', name='api_parse_fields'),
+  url(r'^api/autocomplete/$', 'autocomplete', name='api_autocomplete'),
   url(r'^api/collections/$', 'collections', name='api_collections'),
   url(r'^api/collections/create/$', 'collections_create', name='api_collections_create'),
   url(r'^api/collections/import/$', 'collections_import', name='api_collections_import'),
@@ -45,4 +49,11 @@ urlpatterns += patterns('indexer.api2',
   url(r'^api/indexes/create_wizard_get_sample/$', 'create_wizard_get_sample', name='create_wizard_get_sample'),
   url(r'^api/indexes/create_wizard_create/$', 'create_wizard_create', name='create_wizard_create'),
   url(r'^api/indexes/(?P<index>\w+)/schema/$', 'design_schema', name='design_schema')
+)
+
+urlpatterns += patterns('indexer.api3',
+  # V3
+  url(r'^api/indexer/guess_format/$', 'guess_format', name='guess_format'),
+  url(r'^api/indexer/index_file/$', 'index_file', name='index_file'),
+  url(r'^api/indexer/guess_field_types/$', 'guess_field_types', name='guess_field_types'),
 )

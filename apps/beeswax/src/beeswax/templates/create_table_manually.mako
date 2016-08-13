@@ -73,7 +73,6 @@ ${ assist.assistPanel() }
                   }],
                   navigationSettings: {
                     openItem: false,
-                    showPreview: true,
                     showStats: true
                   }
                 },
@@ -400,6 +399,9 @@ ${ assist.assistPanel() }
             <label class="control-label">${_('Column name')}</label>
             <div class="controls">
                 <input class="column input input-large" name="${form["column_name"].html_name | n}" value="${form["column_name"].data or ''}" placeholder="${_('Column Name')}"/>
+                % if form["column_name"].errors:
+                  <span class="help-inline error-inline">${ form["column_name"].errors.as_text() }</span>
+                % endif
                 <span  class="help-inline error-inline hide">${_('This field is required. Spaces are not allowed.')}</span>
                 <span  class="help-inline error-inline error-inline-bis hide">${_('There is another field with the same name.')}</span>
                 <span class="help-block muted">
@@ -548,23 +550,23 @@ ${ assist.assistPanel() }
   require([
     "knockout",
     "ko.charts",
-    "desktop/js/assist/assistHelper",
+    "desktop/js/apiHelper",
     "assistPanel",
     "tableStats",
     "knockout-mapping",
     "knockout-sortable",
     "ko.editable",
     "ko.hue-bindings"
-  ], function (ko, charts, AssistHelper) {
+  ], function (ko, charts, ApiHelper) {
 
     ko.options.deferUpdates = true;
 
     function MetastoreViewModel(options) {
       var self = this;
-      self.assistHelper = AssistHelper.getInstance(options);
+      self.apiHelper = ApiHelper.getInstance(options);
       self.assistAvailable = ko.observable(true);
       self.isLeftPanelVisible = ko.observable();
-      self.assistHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
+      self.apiHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
 
 
       huePubSub.subscribe("assist.table.selected", function (tableDef) {
@@ -795,7 +797,7 @@ ${ assist.assistPanel() }
       function validateForm() {
         // step 1
         var tableNameFld = $("input[name='table-name']");
-        if (!isValid($.trim(tableNameFld.val()))) {
+        if (!isValid($.trim(tableNameFld.val())) || !withoutSpaces($.trim(tableNameFld.val()))) {
           showFieldError(tableNameFld);
           return false;
         }
@@ -878,6 +880,10 @@ ${ assist.assistPanel() }
       function isValid(str) {
         // validates against empty string
         return (str != "");
+      }
+
+      function withoutSpaces(str) {
+        return (str.indexOf(" ") == -1);
       }
 
       function showFieldError(field) {

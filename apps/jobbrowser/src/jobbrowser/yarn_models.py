@@ -16,24 +16,25 @@
 # limitations under the License.
 
 import logging
+import os
 import re
 import time
-import urlparse
 import urllib2
+import urlparse
 
 from lxml import html
 
 from django.utils.translation import ugettext as _
 
 from desktop.lib.rest.resource import Resource
-from desktop.lib.view_util import format_duration_in_millis
+from desktop.lib.view_util import big_filesizeformat, format_duration_in_millis
 
 from hadoop.yarn.clients import get_log_client
 
 from jobbrowser.models import format_unixtime_ms
 
 
-LOGGER = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 class Application(object):
@@ -44,6 +45,13 @@ class Application(object):
       setattr(self, attr, attrs[attr])
 
     self._fixup()
+
+  @property
+  def logs_url(self):
+    url = self.trackingUrl
+    if self.applicationType == 'SPARK':
+      url = os.path.join(self.trackingUrl, 'executors')
+    return url
 
   def _fixup(self):
     self.is_mr2 = True
@@ -99,40 +107,74 @@ class Application(object):
 
 class SparkJob(Application):
 
-  def __init__(self, job, api=None):
-    super(SparkJob, self).__init__(job, api)
-    self._scrape()
+  def __init__(self, job, rm_api=None, hs_api=None):
+    super(SparkJob, self).__init__(job, rm_api)
+    self._resolve_tracking_url()
+    if self.state not in ('NEW', 'SUBMITTED', 'ACCEPTED', 'RUNNING') and hs_api:
+      self.history_server_api = hs_api
+      self._get_metrics()
 
-  def _history_application_metrics(self, html_doc):
-    metrics = []
-    root = html.fromstring(html_doc)
-    tables = root.findall('.//table')
-    metrics_table = tables[2].findall('.//tr')
-    for tr in metrics_table:
-        header = tr.find('.//th')
-        value = tr.findall('.//td')
-        if value:
-          header = header.text.strip().replace(':', '')
-          value = value[0].text.strip()
-          metrics.append({
-            'header': header,
-            'value': value
-          })
-    return metrics
+  @property
+  def logs_url(self):
+    return os.path.join(self.trackingUrl, 'executors')
 
-  def _scrape(self):
-    # XXX: we have to scrape the tracking URL directly because
-    # spark jobs don't have a JSON api via YARN or app server
-    # see YARN-1530, SPARK-1537 for progress on these apis
-    self.scrapedData = {}
+  @property
+  def attempt_id(self):
+    return self.trackingUrl.strip('/').split('/')[-1]
+
+  def _resolve_tracking_url(self):
+    resp = None
     try:
-      res = urllib2.urlopen(self.trackingUrl)
-      html_doc = res.read()
-      if self.trackingUI == 'History':
-        self.scrapedData['metrics'] = self._history_application_metrics(html_doc)
+      resp = urllib2.urlopen(self.trackingUrl, timeout=5.0)
+      actual_url = resp.url
+      if actual_url.strip('/').split('/')[-1] == 'jobs':
+        actual_url = actual_url.strip('/').replace('jobs', '')
+      self.trackingUrl = actual_url
     except Exception, e:
+      LOG.warn("Failed to resolve Spark Job's actual tracking URL: %s" % e)
+    finally:
+      if resp is not None:
+        resp.close()
+
+  def _get_metrics(self):
+    self.metrics = {}
+    try:
+      executors = self.history_server_api.executors(self.jobId, self.attempt_id)
+      if executors:
+        self.metrics['headers'] = [
+          _('Executor Id'),
+          _('Address'),
+          _('RDD Blocks'),
+          _('Storage Memory'),
+          _('Disk Used'),
+          _('Active Tasks'),
+          _('Failed Tasks'),
+          _('Complete Tasks'),
+          _('Task Time'),
+          _('Input'),
+          _('Shuffle Read'),
+          _('Shuffle Write'),
+          _('Logs')]
+        self.metrics['executors'] = []
+        for e in executors:
+          self.metrics['executors'].append([
+            e.get('id', 'N/A'),
+            e.get('hostPort', ''),
+            e.get('rddBlocks', ''),
+            '%s / %s' % (big_filesizeformat(e.get('memoryUsed', 0)), big_filesizeformat(e.get('maxMemory', 0))),
+            big_filesizeformat(e.get('diskUsed', 0)),
+            e.get('activeTasks', ''),
+            e.get('failedTasks', ''),
+            e.get('completedTasks', ''),
+            format_duration_in_millis(e.get('totalDuration', 0)),
+            big_filesizeformat(e.get('totalInputBytes', 0)),
+            big_filesizeformat(e.get('totalShuffleRead', 0)),
+            big_filesizeformat(e.get('totalShuffleWrite', 0)),
+            e.get('executorLogs', '')
+          ])
+    except Exception, e:
+      LOG.error('Failed to get Spark Job executors: %s' % e)
       # Prevent a nosedive. Don't create metrics if api changes or url is unreachable.
-      self.scrapedData['metrics'] = []
 
 
 class Job(object):
@@ -143,7 +185,7 @@ class Job(object):
     for attr in attrs.keys():
       if attr == 'acls':
         # 'acls' are actually not available in the API
-        LOGGER.warn('Not using attribute: %s' % attrs[attr])
+        LOG.warn('Not using attribute: %s' % attrs[attr])
       else:
         setattr(self, attr, attrs[attr])
 
@@ -207,7 +249,11 @@ class Job(object):
   @property
   def full_job_conf(self):
     if not hasattr(self, '_full_job_conf'):
-      self._full_job_conf = self.api.conf(self.id)['conf']
+      try:
+        conf = self.api.conf(self.id)
+        self._full_job_conf = conf['conf']
+      except TypeError, e:
+        LOG.exception('YARN API call failed to return all the data: %s' % conf)
     return self._full_job_conf
 
   @property
@@ -327,7 +373,6 @@ class Attempt:
       for key, value in attrs.iteritems():
         setattr(self, key, value)
     self.is_mr2 = True
-
     self._fixup()
 
   def _fixup(self):
@@ -357,18 +402,51 @@ class Attempt:
     logs = []
     attempt = self.task.job.job_attempts['jobAttempt'][-1]
     log_link = attempt['logsLink']
-    # Get MR task logs
-    if self.assignedContainerId:
-      log_link = log_link.replace(attempt['containerId'], self.assignedContainerId)
-    if hasattr(self, 'nodeHttpAddress'):
-      log_link = log_link.replace(attempt['nodeHttpAddress'].split(':')[0], self.nodeHttpAddress.split(':')[0])
+
+    # Generate actual task log link from logsLink url
+    if self.task.job.status in ('NEW', 'SUBMITTED', 'RUNNING'):
+      logs_path = '/node/containerlogs/'
+      node_url, tracking_path = log_link.split(logs_path)
+      container_id, user = tracking_path.strip('/').split('/')
+
+      # Replace log path tokens with actual container properties if available
+      if hasattr(self, 'nodeHttpAddress') and 'nodeId' in attempt:
+        node_url = '%s://%s' % (node_url.split('://')[0], self.nodeHttpAddress)
+      container_id = self.assignedContainerId if hasattr(self, 'assignedContainerId') else container_id
+
+      log_link = '%(node_url)s/%(logs_path)s/%(container)s/%(user)s' % {
+        'node_url': node_url,
+        'logs_path': logs_path.strip('/'),
+        'container': container_id,
+        'user': user
+      }
+    else:  # Completed jobs
+      logs_path = '/jobhistory/logs/'
+      root_url, tracking_path = log_link.split(logs_path)
+      node_url, container_id, attempt_id, user = tracking_path.strip('/').split('/')
+
+      # Replace log path tokens with actual attempt properties if available
+      if hasattr(self, 'nodeHttpAddress') and 'nodeId' in attempt:
+        node_url = '%s:%s' % (self.nodeHttpAddress.split(':')[0], attempt['nodeId'].split(':')[1])
+      container_id = self.assignedContainerId if hasattr(self, 'assignedContainerId') else container_id
+      attempt_id = self.attemptId if hasattr(self, 'attemptId') else attempt_id
+
+      log_link = '%(root_url)s/%(logs_path)s/%(node)s/%(container)s/%(attempt)s/%(user)s' % {
+        'root_url': root_url,
+        'logs_path': logs_path.strip('/'),
+        'node': node_url,
+        'container': container_id,
+        'attempt': attempt_id,
+        'user': user
+      }
 
     for name in ('stdout', 'stderr', 'syslog'):
       link = '/%s/' % name
       params = {}
-      if int(offset) >= 0:
+      if int(offset) != 0:
         params['start'] = offset
 
+      response = None
       try:
         log_link = re.sub('job_[^/]+', self.id, log_link)
         root = Resource(get_log_client(log_link), urlparse.urlsplit(log_link)[2], urlencode=False)
@@ -378,8 +456,9 @@ class Attempt:
         log = _('Failed to retrieve log: %s' % e)
         try:
           debug_info = '\nLog Link: %s' % log_link
-          debug_info += '\nHTML Response: %s' % response
-          LOGGER.error(debug_info)
+          if response:
+            debug_info += '\nHTML Response: %s' % response
+          LOG.error(debug_info)
         except:
           LOG.exception('failed to build debug info')
 

@@ -64,6 +64,9 @@ def ha_error_handler(func):
 
 
 def get_api(user, component):
+  if component == 'solr':
+    component = component.upper()
+
   client = _get_client(user.username, component)
 
   return SentryApi(client)
@@ -162,8 +165,8 @@ class SentryApi(object):
       raise SentryException(response)
 
   @ha_error_handler
-  def list_sentry_privileges_by_authorizable(self, authorizableSet, groups=None, roleSet=None):
-    response = self.client.list_sentry_privileges_by_authorizable(authorizableSet, groups, roleSet)
+  def list_sentry_privileges_by_authorizable(self, serviceName, authorizableSet, groups=None, roleSet=None):
+    response = self.client.list_sentry_privileges_by_authorizable(serviceName, authorizableSet, groups, roleSet)
 
     if response.status.value != 0:
       raise SentryException(response)
@@ -174,7 +177,7 @@ class SentryApi(object):
       _roles = {}
       for role, privileges in roles.privilegeMap.iteritems():
         _roles[role] = [self._massage_privilege(privilege) for privilege in privileges]
-      _privileges.append((self._massage_authorizable(authorizable), _roles))
+      _privileges.append((self._massage_string_authorizable(authorizable), _roles))
 
     return _privileges
 
@@ -211,6 +214,10 @@ class SentryApi(object):
 
   def _massage_authorizable(self, authorizables):
     return [{'type': auth.type, 'name': auth.name} for auth in authorizables]
+
+
+  def _massage_string_authorizable(self, authorizables):
+    return [{'type': auth.split('=')[0], 'name': auth.split('=')[1]} for auth in authorizables.split('->')]
 
 
 class SentryException(Exception):

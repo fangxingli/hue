@@ -20,8 +20,10 @@ import logging
 import os
 
 from django.utils.translation import ugettext_lazy as _t
+
 from desktop.lib.conf import Config, UnspecifiedConfigSection, ConfigSection, coerce_bool
 from desktop.conf import default_ssl_validate
+
 
 LOG = logging.getLogger(__name__)
 DEFAULT_NN_HTTP_PORT = 50070
@@ -42,6 +44,7 @@ def find_file_recursive(desired_glob, root):
 
   f.__doc__ = "Finds %s/%s" % (root, desired_glob)
   return f
+
 
 
 UPLOAD_CHUNK_SIZE = Config(
@@ -146,6 +149,9 @@ YARN_CLUSTERS = UnspecifiedConfigSection(
       HISTORY_SERVER_API_URL=Config("history_server_api_url",
                   default='http://localhost:19888',
                   help="URL of the HistoryServer API"),
+      SPARK_HISTORY_SERVER_URL=Config("spark_history_server_url",
+                  default='http://localhost:18088',
+                  help="URL of the Spark History Server"),
       SSL_CERT_CA_VERIFY=Config("ssl_cert_ca_verify",
                   help="In secure mode (HTTPS), if SSL certificates from YARN Rest APIs have to be verified against certificate authority",
                   dynamic_default=default_ssl_validate,

@@ -860,7 +860,7 @@ var Collection = function (vm, collection) {
       iterable = self.template.fields();
     }
     return $.map(iterable, function (field) {
-      if (field.name() != '' && extraCheck(field.type())) {
+      if (typeof field !== 'undefined' && field.name() != '' && extraCheck(field.type())) {
         return field;
       }
     }).sort(function (a, b) {
@@ -1643,7 +1643,7 @@ var SearchViewModel = function (collection_json, query_json, initial_json) {
     });
   }
 
-  self.getDocument = function (doc) {
+  self.getDocument = function (doc, callback) {
     $.post("/search/get_document", {
       collection: ko.mapping.toJSON(self.collection),
       id: doc.id
@@ -1678,6 +1678,9 @@ var SearchViewModel = function (collection_json, query_json, initial_json) {
       }
       doc.details(details);
       doc.originalDetails(ko.toJSON(doc.details()));
+      if (callback) {
+        callback(details);
+      }
     }, "text").fail(function (xhr, textStatus, errorThrown) {
       $(document).trigger("error", xhr.responseText);
     });
@@ -1689,14 +1692,22 @@ var SearchViewModel = function (collection_json, query_json, initial_json) {
       document: ko.mapping.toJSON(doc),
       id: doc.id
     }, function (data) {
+      data = JSON.bigdataParse(data);
       if (data.status == 0) {
         doc.showEdit(false);
+
+        var versionField = $.grep(doc.details(), function(field) { return field.key() == '_version_'; });
+        if (versionField.length > 0) {
+          versionField[0].value( data.update.adds[1]);
+          versionField[0].hasChanged(false);
+        };
+
         doc.originalDetails(ko.toJSON(doc.details()));
       }
       else {
         $(document).trigger("error", data.message);
       }
-    }).fail(function (xhr, textStatus, errorThrown) {
+    }, "text").fail(function (xhr, textStatus, errorThrown) {
       $(document).trigger("error", xhr.responseText);
     });
   };

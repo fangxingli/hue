@@ -103,7 +103,13 @@ from django.utils.translation import ugettext as _
       <h3>${_('Confirm Delete')}</h3>
     </div>
     <div class="modal-body">
+      <!-- ko if: isS3() && isS3Root() -->
+      <p>${_('Are you sure you want to delete these buckets?')}</p>
+      <p class="muted">${_('Deleting a bucket will delete all of its contents and release the bucket name to be reserved by others.')}</p>
+      <!-- /ko -->
+      <!-- ko ifnot: isS3() && isS3Root() -->
       <p>${_('Are you sure you want to delete these files?')}</p>
+      <!-- /ko -->
     </div>
     <div class="modal-footer">
       <form id="deleteForm" action="/filebrowser/rmtree" method="POST" enctype="multipart/form-data" class="form-stacked">
@@ -153,9 +159,9 @@ from django.utils.translation import ugettext as _
   </div>
 
   <!-- rename modal -->
-  <div id="renameModal" class="modal hide fade">
-    <form id="renameForm" action="/filebrowser/rename?next=${current_request_path | n,unicode }" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
-      ${ csrf_token(request) | n,unicode }
+  <form id="renameForm" action="/filebrowser/rename?next=${current_request_path | n,unicode }" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
+    ${ csrf_token(request) | n,unicode }
+    <div id="renameModal" class="modal hide fade">
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
         <h3>${_('Renaming:')} <span id="renameFileName">file name</span></h3>
@@ -174,17 +180,17 @@ from django.utils.translation import ugettext as _
         <a class="btn" data-dismiss="modal">${_('Cancel')}</a>
         <input type="submit" value="${_('Rename')}" class="btn btn-primary" />
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <!-- chown modal -->
   % if is_fs_superuser:
-  <div id="changeOwnerModal" class="modal hide fade">
+  <form id="chownForm" action="/filebrowser/chown" method="POST" enctype="multipart/form-data" class="form-stacked form-padding-fix">
+    ${ csrf_token(request) | n,unicode }
+    <div id="changeOwnerModal" class="modal hide fade">
     <%
       select_filter = is_fs_superuser and 'SelectWithOther' or ''
     %>
-    <form id="chownForm" action="/filebrowser/chown" method="POST" enctype="multipart/form-data" class="form-stacked form-padding-fix">
-      ${ csrf_token(request) | n,unicode }
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
         <h3>${_('Change Owner/Group')}</h3>
@@ -209,14 +215,14 @@ from django.utils.translation import ugettext as _
         <a class="btn" onclick="$('#changeOwnerModal').modal('hide');">${_('Cancel')}</a>
         <input class="btn btn-primary" type="submit" value="${_('Submit')}" />
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
   % endif
 
   <!-- chmod modal -->
-  <div id="changePermissionModal" class="modal hide fade">
-    <form action="/filebrowser/chmod" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix" id="chmodForm">
-      ${ csrf_token(request) | n,unicode }
+  <form action="/filebrowser/chmod" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix" id="chmodForm">
+    ${ csrf_token(request) | n,unicode }
+    <div id="changePermissionModal" class="modal hide fade">
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
         <h3>${_('Change Permissions:')} </h3>
@@ -274,19 +280,19 @@ from django.utils.translation import ugettext as _
         <a class="btn" onclick="$('#changePermissionModal').modal('hide');">${_('Cancel')}</a>
         <input class="btn btn-primary" type="submit" value="${_('Submit')}"/>
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <!-- move modal -->
-  <div id="moveModal" class="modal hide fade">
-    <form id="moveForm" action="/filebrowser/move" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
-      ${ csrf_token(request) | n,unicode }
+  <form id="moveForm" action="/filebrowser/move" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
+    ${ csrf_token(request) | n,unicode }
+    <div id="moveModal" class="modal hide fade">
       <div class="modal-header" style="padding-bottom: 10px">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
         <h3>${_('Move to')}</h3>
       </div>
       <div class="modal-body">
-        <div id="moveHdfsTree" style="padding-left: 15px;"></div>
+        <div id="moveHdfsTree"></div>
       </div>
       <div class="modal-footer">
         <div>
@@ -296,13 +302,13 @@ from django.utils.translation import ugettext as _
         <a class="btn" onclick="$('#moveModal').modal('hide');">${_('Cancel')}</a>
         <input class="btn btn-primary disable-enter" type="submit" value="${_('Move')}"/>
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <!-- copy modal -->
-  <div id="copyModal" class="modal hide fade">
-    <form id="copyForm" action="/filebrowser/copy" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
-      ${ csrf_token(request) | n,unicode }
+  <form id="copyForm" action="/filebrowser/copy" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
+    ${ csrf_token(request) | n,unicode }
+    <div id="copyModal" class="modal hide fade">
       <div class="modal-header" style="padding-bottom: 10px">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
         <h3>${_('Copy to')}</h3>
@@ -318,11 +324,11 @@ from django.utils.translation import ugettext as _
         <a class="btn" onclick="$('#copyModal').modal('hide');">${_('Cancel')}</a>
         <input class="btn btn-primary disable-enter" type="submit" value="${_('Copy')}"/>
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <!-- upload file modal -->
-  <div id="uploadFileModal" class="modal hide fade" data-backdrop="static">
+  <div id="uploadFileModal" class="modal hide fade">
     <div class="modal-header">
       <a href="#" class="close" data-dismiss="modal" data-bind="visible: pendingUploads() == 0">&times;</a>
       <h3>${_('Upload to')} <span id="uploadDirName" data-bind="text: currentPath"></span></h3>
@@ -354,15 +360,27 @@ from django.utils.translation import ugettext as _
   </div>
 
   <!-- new directory modal -->
-  <div id="createDirectoryModal" class="modal hide fade">
-    <form id="createDirectoryForm" data-bind="submit: createDirectory" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
-      ${ csrf_token(request) | n,unicode }
+  <form id="createDirectoryForm" data-bind="submit: createDirectory" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
+    ${ csrf_token(request) | n,unicode }
+    <div id="createDirectoryModal" class="modal hide fade">
       <div class="modal-header">
         <a href="#" class="close" data-dismiss="modal">&times;</a>
+        <!-- ko if: !isS3() || (isS3() && !isS3Root()) -->
         <h3>${_('Create Directory')}</h3>
+        <!-- /ko -->
+        <!-- ko if: isS3() && isS3Root() -->
+        <h3>${_('Create Bucket')}</h3>
+        <!-- /ko -->
       </div>
       <div class="modal-body">
-        <label>${_('Directory Name')} <input id="newDirectoryNameInput" name="name" value="" type="text" class="input-xlarge"/></label>
+        <label>
+          <!-- ko if: !isS3() || (isS3() && !isS3Root()) -->
+          ${_('Directory Name')}
+          <!-- /ko -->
+          <!-- ko if: isS3() && isS3Root() -->
+          ${_('Bucket Name')}
+          <!-- /ko -->
+          <input id="newDirectoryNameInput" name="name" value="" type="text" class="input-xlarge"/></label>
         <input type="hidden" name="path" type="text" data-bind="value: currentPath"/>
       </div>
       <div class="modal-footer">
@@ -375,33 +393,33 @@ from django.utils.translation import ugettext as _
         <a class="btn" href="#" data-dismiss="modal">${_('Cancel')}</a>
         <input class="btn btn-primary" type="submit" value="${_('Create')}" />
       </div>
-    </form>
-  </div>
+    </div>
+  </form>
 
   <!-- new file modal -->
-  <div id="createFileModal" class="modal hide fade">
-    <form id="createFileForm" data-bind="submit: createFile" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
-      ${ csrf_token(request) | n,unicode }
-      <div class="modal-header">
-        <a href="#" class="close" data-dismiss="modal">&times;</a>
-        <h3>${_('Create File')}</h3>
-      </div>
-      <div class="modal-body">
-        <label>${_('File Name')} <input id="newFileNameInput" name="name" value="" type="text" class="input-xlarge"/></label>
-        <input type="hidden" name="path" type="text" data-bind="value: currentPath"/>
-      </div>
-      <div class="modal-footer">
-         <div id="fileNameRequiredAlert" class="alert-message error hide" style="position: absolute; left: 10px;">
-          <span class="label label-important">${_('File name is required.')}</span>
+  <form id="createFileForm" data-bind="submit: createFile" method="POST" enctype="multipart/form-data" class="form-inline form-padding-fix">
+    ${ csrf_token(request) | n,unicode }
+    <div id="createFileModal" class="modal hide fade">
+        <div class="modal-header">
+          <a href="#" class="close" data-dismiss="modal">&times;</a>
+          <h3>${_('Create File')}</h3>
         </div>
-        <div id="fileNameExistsAlert" class="hide" style="position: absolute; left: 10px;">
-          <span class="label label-important"><span class="newName"></span> ${_('already exists.')}</span>
+        <div class="modal-body">
+          <label>${_('File Name')} <input id="newFileNameInput" name="name" value="" type="text" class="input-xlarge"/></label>
+          <input type="hidden" name="path" type="text" data-bind="value: currentPath"/>
         </div>
-        <a class="btn" href="#" data-dismiss="modal">${_('Cancel')}</a>
-        <input class="btn btn-primary" type="submit" value="${_('Create')}" />
-      </div>
-    </form>
-  </div>
+        <div class="modal-footer">
+           <div id="fileNameRequiredAlert" class="alert-message error hide" style="position: absolute; left: 10px;">
+            <span class="label label-important">${_('File name is required.')}</span>
+          </div>
+          <div id="fileNameExistsAlert" class="hide" style="position: absolute; left: 10px;">
+            <span class="label label-important"><span class="newName"></span> ${_('already exists.')}</span>
+          </div>
+          <a class="btn" href="#" data-dismiss="modal">${_('Cancel')}</a>
+          <input class="btn btn-primary" type="submit" value="${_('Create')}" />
+        </div>
+    </div>
+  </form>
 
   <!-- content summary modal -->
   <div id="contentSummaryModal" class="modal hide fade">
@@ -458,7 +476,7 @@ from django.utils.translation import ugettext as _
     % if show_download_button:
     <li><a href="#" title="${_('Download')}" data-bind="visible: !$root.inTrash() && $root.selectedFiles().length == 1 && selectedFile().type == 'file', click: $root.downloadFile"><i class="fa fa-fw fa-arrow-circle-o-down"></i> ${_('Download')}</a></li>
     % endif
-    <li class="divider"></li>
+    <li class="divider" data-bind="visible: !isS3()"></li>
     % if is_fs_superuser:
     <li data-bind="css: {'disabled': $root.isCurrentDirSentryManaged || selectedSentryFiles().length > 0 }">
       <a href="#" data-bind="visible: !$root.inTrash(), click: $root.changeOwner, enable: $root.selectedFiles().length > 0">
@@ -466,17 +484,18 @@ from django.utils.translation import ugettext as _
       </a>
     </li>
     % endif
-    <li data-bind="css: {'disabled': $root.isCurrentDirSentryManaged() || selectedSentryFiles().length > 0 }">
+    <li data-bind="css: {'disabled': $root.isCurrentDirSentryManaged() || selectedSentryFiles().length > 0 }, visible: !isS3()">
       <a href="#" data-bind="visible: !$root.inTrash(), click: $root.changePermissions, enable: $root.selectedFiles().length > 0">
         <i class="fa fa-fw fa-list-alt"></i> ${_('Change permissions')}
       </a>
     </li>
     <li class="divider"></li>
-    <li><a href="#" data-bind="enable: $root.selectedFiles().length > 0 && isCurrentDirSelected().length == 0,
-    click: $root.trashSelected"><i class="fa fa-fw fa-times"></i> ${_('Move to trash')}</a></li>
+    % if is_trash_enabled:
+    <li><a href="#" data-bind="enable: $root.selectedFiles().length > 0 && isCurrentDirSelected().length == 0, click: $root.trashSelected"><i class="fa fa-fw fa-times"></i> ${_('Move to trash')}</a></li>
+    %endif
     <li><a href="#" class="delete-link" title="${_('Delete forever')}" data-bind="enable: $root.selectedFiles().length > 0, click: $root.deleteSelected"><i class="fa fa-fw fa-bolt"></i> ${_('Delete forever')}</a></li>
-    <li class="divider"></li>
-    <li data-bind="css: {'disabled': selectedFiles().length > 1 }">
+    <li class="divider" data-bind="visible: !isS3()"></li>
+    <li data-bind="css: {'disabled': selectedFiles().length > 1 }, visible: !isS3()">
       <a class="pointer" data-bind="click: function(){ selectedFiles().length == 1 ? showSummary(): void(0)}"><i class="fa fa-fw fa-pie-chart"></i> ${_('Summary')}</a>
     </li>
   <!-- /ko -->
@@ -501,7 +520,7 @@ from django.utils.translation import ugettext as _
 </div>
 
   <script id="fileTemplate" type="text/html">
-    <tr style="cursor: pointer" data-bind="drop: { enabled: name !== '.' && type !== 'file', value: $data }, event: { mouseover: toggleHover, mouseout: toggleHover, contextmenu: showContextMenu }, click: $root.viewFile, css: { 'row-selected': selected() }">
+    <tr style="cursor: pointer" data-bind="drop: { enabled: name !== '.' && type !== 'file', value: $data }, event: { mouseover: toggleHover, mouseout: toggleHover, contextmenu: showContextMenu }, click: $root.viewFile, css: { 'row-selected': selected(), 'row-highlighted': highlighted() }">
       <td class="center" data-bind="click: handleSelect" style="cursor: default">
         <div data-bind="visible: name != '..', css: { hueCheckbox: name != '..', 'fa': name != '..', 'fa-check': selected }"></div>
       </td>
@@ -509,7 +528,7 @@ from django.utils.translation import ugettext as _
        % if 'oozie' in apps:
       'fa-play': $.inArray(name, ['workflow.xml', 'coordinator.xml', 'bundle.xml']) > -1,
        % endif
-      'fa-file-o': type == 'file', 'fa-folder': type != 'file', 'fa-folder-open': type != 'file' && hovered }"></i></td>
+      'fa-file-o': type == 'file', 'fa-folder': type != 'file', 'fa-folder-open': type != 'file' && hovered(), 'fa-cloud': type != 'file' && isBucket() }"></i></td>
       <td data-bind="attr: {'title': tooltip}" rel="tooltip">
         <!-- ko if: name == '..' -->
         <a href="#" data-bind="click: $root.viewFile"><i class="fa fa-level-up"></i></a>
@@ -523,9 +542,9 @@ from django.utils.translation import ugettext as _
       </td>
       <td>
         % if is_fs_superuser:
-        <span data-bind="text: stats.user, visible: ! selected() || $root.isCurrentDirSentryManaged() || isSentryManaged"></span>
+        <span data-bind="text: stats.user, visible: !selected() || $root.isCurrentDirSentryManaged() || isSentryManaged"></span>
         <a href="#" rel="tooltip" title="${_('Change owner')}" data-original-title="${_('Change owner')}"
-            data-bind="text: stats.user, visible: ! $root.inTrash() && selected() && ! $root.isCurrentDirSentryManaged() && ! isSentryManaged, click: $root.changeOwner, enable: $root.selectedFiles().length > 0"></a>
+            data-bind="text: stats.user, visible: !$root.inTrash() && selected() && !$root.isCurrentDirSentryManaged() && !isSentryManaged, click: $root.changeOwner, enable: $root.selectedFiles().length > 0"></a>
         % else:
         <span data-bind="text: stats.user"></span>
         % endif
@@ -534,15 +553,15 @@ from django.utils.translation import ugettext as _
         % if is_fs_superuser:
         <span data-bind="text: stats.group, visible: ! selected() || $root.isCurrentDirSentryManaged() || isSentryManaged"></span>
         <a href="#" rel="tooltip" title="${_('Change group')}" data-original-title="${_('Change group')}"
-            data-bind="text: stats.group, visible: ! $root.inTrash() && selected() && ! $root.isCurrentDirSentryManaged() && ! isSentryManaged, click: $root.changeOwner"></a>
+            data-bind="text: stats.group, visible: !$root.inTrash() && selected() && !$root.isCurrentDirSentryManaged() && !isSentryManaged, click: $root.changeOwner"></a>
         % else:
         <span data-bind="text: stats.group"></span>
         % endif
       </td>
       <td>
-        <span data-bind="text: permissions, visible: ! selected() || $root.isCurrentDirSentryManaged() || isSentryManaged"></span>
+        <span data-bind="text: permissions, visible: $root.isS3() || !selected() || $root.isCurrentDirSentryManaged() || isSentryManaged"></span>
         <a href="#" rel="tooltip" title="${_('Change permissions')}"
-            data-bind="text: permissions, visible: ! $root.inTrash() && selected() && ! $root.isCurrentDirSentryManaged() && ! isSentryManaged, click: $root.changePermissions" data-original-title="${_('Change permissions')}"></a>
+            data-bind="text: permissions, visible: !$root.isS3() && !$root.inTrash() && selected() && !$root.isCurrentDirSentryManaged() && !isSentryManaged, click: $root.changePermissions" data-original-title="${_('Change permissions')}"></a>
       </td>
       <td data-bind="text: stats.mtime" style="white-space: nowrap;"></td>
     </tr>
@@ -555,6 +574,7 @@ from django.utils.translation import ugettext as _
   <script src="${ static('desktop/ext/js/jquery/plugins/jquery-ui-1.10.4.draggable-droppable-sortable.min.js') }" type="text/javascript" charset="utf-8"></script>
   <script src="${ static('desktop/ext/js/datatables-paging-0.1.js') }" type="text/javascript" charset="utf-8"></script>
   <script src="${ static('desktop/js/dropzone.js') }" type="text/javascript" charset="utf-8"></script>
+  <script src="${ static('desktop/js/ko.hue-bindings.js') }" type="text/javascript" charset="utf-8"></script>
 
 
   <script charset="utf-8">
@@ -698,7 +718,7 @@ from django.utils.translation import ugettext as _
     };
 
     var resetActionbar = function() {
-      $(".actionbar").attr("style", "min-width: 1190px");
+      $(".actionbar").attr("style", "min-width: 800px");
       $(".actionbar").data("originalWidth", $(".actionbar").width());
       $(".actionbarGhost").addClass("hide");
     };
@@ -758,11 +778,16 @@ from django.utils.translation import ugettext as _
           group: file.stats.group,
           mtime: file.mtime
         },
+        isBucket: ko.pureComputed(function(){
+          return file.path.toLowerCase().indexOf('s3://') == 0 && file.path.substr(5).indexOf('/') == -1
+        }),
         selected: ko.observable(false),
+        highlighted: ko.observable(file.highlighted || false),
         handleSelect: function (row, e) {
           e.preventDefault();
           e.stopPropagation();
           this.selected(! this.selected());
+          this.highlighted(false);
           viewModel.allSelected(false);
         },
         // display the context menu when an item is right/context clicked
@@ -782,6 +807,11 @@ from django.utils.translation import ugettext as _
           if ($.inArray(row.name, ['..', '.', '.Trash']) === -1) {
             this.selected(true);
             cm.css({ display: 'block', top: e.pageY - 15, left: (e.pageX < rect.right - 200 ) ? e.pageX : e.pageX - 250 });
+            if ($(window).height() - 55 < $('.context-menu').position().top - $('body').scrollTop() + $('.context-menu').height()) {
+              cm.css({
+                top: e.pageY - $('.context-menu').height()
+              });
+            }
           } else {
             cm.css({ display: 'none' });
           }
@@ -798,15 +828,20 @@ from django.utils.translation import ugettext as _
       return {
         url: breadcrumb.url,
         label: breadcrumb.label,
-        show: function () {
-          if (this.url == null || this.url == "") {
-            // forcing root on empty breadcrumb url
-            this.url = "/";
-          }
+        show: function (breadcrumb, e) {
+          var isLeftButton = (e.which || e.button) === 1;
+          if (isLeftButton) {
+            e.stopPropagation();
+            e.preventDefault();
+            if (this.url == null || this.url == "") {
+              // forcing root on empty breadcrumb url
+              this.url = "/";
+            }
 
-          viewModel.targetPageNum(1);
-          viewModel.targetPath("${url('filebrowser.views.view', path='')}" + stripHashes(this.url));
-          location.hash = this.url;
+            viewModel.targetPageNum(1);
+            viewModel.targetPath("${url('filebrowser.views.view', path='')}" + stripHashes(this.url));
+            location.hash = this.url;
+          }
         }
       }
     };
@@ -826,8 +861,23 @@ from django.utils.translation import ugettext as _
       self.sortBy = ko.observable("name");
       self.sortDescending = ko.observable(false);
       self.searchQuery = ko.observable("");
+      self.searchQuery.extend({ rateLimit: 500 });
+      self.enableFilterAfterSearch = true;
       self.isCurrentDirSentryManaged = ko.observable(false);
       self.pendingUploads = ko.observable(0);
+      self.pendingUploads.subscribe(function (val) {
+        if (val > 0) {
+          if ($('#uploadFileModal').data('modal')) {
+            $('#uploadFileModal').data('modal').$element.off('keyup.dismiss.modal');
+            $('#uploadFileModal').data('modal').$backdrop.off('click');
+          }
+          if ($('#uploadArchiveModal').data('modal')) {
+            $('#uploadArchiveModal').data('modal').$element.off('keyup.dismiss.modal');
+            $('#uploadArchiveModal').data('modal').$backdrop.off('click');
+          }
+        }
+      });
+      self.lastUploadBatch = ko.observableArray([]);
 
       self.fileNameSorting = function (l, r) {
         if (l.name == "..") {
@@ -921,6 +971,14 @@ from django.utils.translation import ugettext as _
         $(document).trigger('currPathLoaded', { path: path });
       });
 
+      self.isS3 = ko.pureComputed(function () {
+        return self.currentPath().toLowerCase().indexOf('s3://') === 0;
+      });
+
+      self.isS3Root = ko.pureComputed(function () {
+        return self.isS3() && self.currentPath().toLowerCase() === 's3://';
+      });
+
       self.inTrash = ko.computed(function() {
         return self.currentPath().match(/^\/user\/.+?\/\.Trash/);
       });
@@ -942,8 +1000,16 @@ from django.utils.translation import ugettext as _
         self.isLoadingSummary(true);
         $("#contentSummaryModal").modal("show");
         $.getJSON("${url('filebrowser.views.content_summary', path='')}" + self.selectedFile().path, function (data) {
-          self.contentSummary(ko.mapping.fromJS(data));
-          self.isLoadingSummary(false);
+          if (data.status == 0) {
+            self.contentSummary(ko.mapping.fromJS(data.summary));
+            self.isLoadingSummary(false);
+          } else {
+            $(document).trigger("error", data.message);
+            $("#contentSummaryModal").modal("hide");
+          }
+        }).fail(function (xhr, textStatus, errorThrown) {
+          $(document).trigger("error", xhr.responseText);
+          $("#contentSummaryModal").modal("hide");
         });
       }
 
@@ -984,8 +1050,10 @@ from django.utils.translation import ugettext as _
         self.page(new Page(page));
 
         self.files(ko.utils.arrayMap(files, function (file) {
+          file.highlighted = self.lastUploadBatch.indexOf(file.path) > -1;
           return new File(file);
         }));
+        self.lastUploadBatch([]);
         if (self.sortBy() == "name"){
           self.files.sort(self.fileNameSorting);
         }
@@ -1002,7 +1070,12 @@ from django.utils.translation import ugettext as _
 
         $("*[rel='tooltip']").tooltip({ placement:"left" });
 
-        $(window).scrollTop(0);
+        if ($('.row-highlighted').length > 0) {
+          $(window).scrollTop($('.row-highlighted:eq(0)').offset().top - 150);
+        }
+        else {
+          $(window).scrollTop(0);
+        }
 
         resetActionbar();
       };
@@ -1061,7 +1134,10 @@ from django.utils.translation import ugettext as _
       };
 
       self.searchQuery.subscribe(function (newValue) {
-        self.filter();
+        if (newValue !== '' || self.enableFilterAfterSearch) {
+          self.filter();
+        }
+        self.enableFilterAfterSearch = true;
       });
 
       self.filter = function () {
@@ -1073,6 +1149,7 @@ from django.utils.translation import ugettext as _
         if (file.type == "dir") {
           // Reset page number so that we don't hit a page that doesn't exist
           self.targetPageNum(1);
+          self.enableFilterAfterSearch = false;
           self.searchQuery("");
           self.targetPath("${url('filebrowser.views.view', path='')}" + stripHashes(file.path));
           location.hash = stripHashes(file.path);
@@ -1134,10 +1211,11 @@ from django.utils.translation import ugettext as _
               $("#moveHdfsTree").remove();
               $("<div>").attr("id", "moveHdfsTree").appendTo($("#moveModal .modal-body"));
               $("#moveHdfsTree").jHueHdfsTree({
-                home: "/user/${ user }",
+                home: viewModel.isS3() ? "" : "/user/${ user }",
+                isS3: viewModel.isS3(),
                 initialPath: viewModel.currentPath(),
                 onPathChange: function (path) {
-                  $("#moveDestination").val((path.indexOf("/") == 0 ? "" : "/") + path);
+                  $("#moveDestination").val((viewModel.isS3() ? "" : (path.indexOf("/") == 0 ? "" : "/")) + path);
                   $("#moveNameRequiredAlert").hide();
                 }
               });
@@ -1170,10 +1248,11 @@ from django.utils.translation import ugettext as _
           $("#copyHdfsTree").remove();
           $("<div>").attr("id", "copyHdfsTree").appendTo($("#copyModal .modal-body"));
           $("#copyHdfsTree").jHueHdfsTree({
-            home: "/user/${ user }",
+            home: viewModel.isS3() ? "" : "/user/${ user }",
+            isS3: viewModel.isS3(),
             initialPath: viewModel.currentPath(),
             onPathChange: function(path){
-              $("#copyDestination").val((path.indexOf("/") == 0 ? "" : "/") + path);
+              $("#copyDestination").val((viewModel.isS3() ? "" : (path.indexOf("/") == 0 ? "" : "/")) + path);
               $("#copyNameRequiredAlert").hide();
             }
           });
@@ -1384,6 +1463,7 @@ from django.utils.translation import ugettext as _
             }
             else {
               $(document).trigger('info', response.path + "${ _(' uploaded successfully.') }");
+              self.lastUploadBatch.push(response.path);
             }
             if (self.pendingUploads() == 0) {
               $('#uploadFileModal').modal('hide');
@@ -1408,8 +1488,6 @@ from django.utils.translation import ugettext as _
 
         return function () {
           $("#uploadFileModal").modal({
-            keyboard: false,
-            backdrop: 'static',
             show: true
           });
         };
@@ -1455,6 +1533,7 @@ from django.utils.translation import ugettext as _
             }
             else {
               $(document).trigger('info', response.path + "${ _(' uploaded successfully.') }");
+              self.lastUploadBatch.push(response.path);
             }
             if (self.pendingUploads() == 0) {
               $('#uploadArchiveModal').modal('hide');
@@ -1479,8 +1558,6 @@ from django.utils.translation import ugettext as _
 
         return function () {
           $("#uploadArchiveModal").modal({
-            keyboard: false,
-            backdrop: 'static',
             show: true
           });
         };
@@ -1575,7 +1652,7 @@ from django.utils.translation import ugettext as _
         $('body').on('dragenter', function (e) {
           e.preventDefault();
 
-          if (_isExternalFile && !($("#uploadFileModal").is(":visible")) && !($("#uploadArchiveModal").is(":visible"))) {
+          if (_isExternalFile && !($("#uploadFileModal").is(":visible")) && !($("#uploadArchiveModal").is(":visible")) && (!viewModel.isS3() || (viewModel.isS3() && !viewModel.isS3Root()))) {
             showHoverMsg("${_('Drop files here to upload')}");
           }
         });
@@ -1605,7 +1682,7 @@ from django.utils.translation import ugettext as _
           try {
             _dropzone.destroy();
           }
-          catch (e) {
+          catch (exc) {
           }
           var options = {
             url: '/filebrowser/upload/file?dest=' + ops.path,
@@ -1663,22 +1740,25 @@ from django.utils.translation import ugettext as _
                   }
                   else {
                     $(document).trigger('info', response.path + "${ _(' uploaded successfully.') }");
+                    viewModel.lastUploadBatch.push(response.path);
                   }
                 }
               }
             }
           };
-          _dropzone = new Dropzone(document.body, options);
+          if (ops.path.toLowerCase() !== 's3://') {
+            _dropzone = new Dropzone(document.body, options);
 
-          _dropzone.on('queuecomplete', function () {
+            _dropzone.on('queuecomplete', function () {
               setTimeout(function () {
-                $('#progressStatus').addClass('hide');
-                $('#progressStatusBar').addClass('hide');
-                $('#progressStatusBar div').css("width", "0");
-                viewModel.retrieveData();
-                },
-              2500);
-          });
+                    $('#progressStatus').addClass('hide');
+                    $('#progressStatusBar').addClass('hide');
+                    $('#progressStatusBar div').css("width", "0");
+                    viewModel.retrieveData();
+                  },
+                  2500);
+            });
+          }
         });
       }
 
@@ -1909,7 +1989,10 @@ from django.utils.translation import ugettext as _
 
       if (location.hash != null && location.hash.length > 1) {
         var targetPath = "";
-        var hash = window.location.hash.substring(1).replace(/(<([^>]+)>)/ig, "");
+        var hash = window.location.hash.substring(1);
+        if (hash.search(/(<([^>]+)>)/ig) > -1) {
+          hash = encodeURI(hash);
+        }
         if (hash != null && hash != "") {
           targetPath = "${url('filebrowser.views.view', path='')}";
           if (hash.indexOf("!!") != 0) {
@@ -1938,15 +2021,12 @@ from django.utils.translation import ugettext as _
 
       viewModel.retrieveData();
 
-      $(".search-query").jHueDelayedInput(function(){
-        viewModel.searchQuery($(".search-query").val());
-        viewModel.filter();
-      }, 500);
-
-      $("#editBreadcrumb").click(function () {
-        $(this).hide();
-        $(".hueBreadcrumb").hide();
-        $("#hueBreadcrumbText").show().focus();
+      $("#editBreadcrumb").click(function (e) {
+        if ($(e.target).is('ul')){
+          $(this).hide();
+          $(".hueBreadcrumb").hide();
+          $("#hueBreadcrumbText").show().focus();
+        }
       });
 
       $("#hueBreadcrumbText").jHueHdfsAutocomplete({
@@ -1983,7 +2063,10 @@ from django.utils.translation import ugettext as _
 
       $(window).bind("hashchange", function () {
         var targetPath = "";
-        var hash = window.location.hash.substring(1).replace(/(<([^>]+)>)/ig, "");
+        var hash = window.location.hash.substring(1);
+        if (hash.search(/(<([^>]+)>)/ig) > -1) {
+          hash = encodeURI(hash);
+        }
 
         if (hash != null && hash != "") {
           addPathToHistory(hash);

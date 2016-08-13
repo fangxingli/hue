@@ -46,11 +46,13 @@ def coerce_database(database):
 
 
 def coerce_port(port):
-  port = int(port)
-  if port == 0:
-    return ''
-  else:
-    return port
+  try:
+    port = int(port)
+    if port == 0:
+      port = ''
+  except ValueError, e:
+    port = ''
+  return port
 
 
 def coerce_file(path):
@@ -71,6 +73,9 @@ def coerce_positive_integer(integer):
 
   return integer
 
+def is_https_enabled():
+  """Hue is configured for HTTPS."""
+  return bool(SSL_CERTIFICATE.get() and SSL_PRIVATE_KEY.get())
 
 HTTP_HOST = Config(
   key="http_host",
@@ -159,6 +164,59 @@ SSL_VALIDATE = Config(
   help=_('Choose whether Hue should validate certificates received from the server.'),
   type=coerce_bool,
   default=True)
+
+SECURE_HSTS_SECONDS = Config(
+  key="secure_hsts_seconds",
+  help=_('Strict-Transport-Security: max-age=31536000 This is a HTTP response header, Once a supported browser receives this header that browser will prevent any communications from being sent over HTTP to the specified domain and will instead send all communications over HTTPS.'),
+  type=int,
+  default=31536000)
+
+SECURE_HSTS_INCLUDE_SUBDOMAINS = Config(
+  key="secure_hsts_include_subdomains",
+  help=_('Strict-Transport-Security: This is a HTTP response header, Once a supported browser receives this header that browser will prevent any communications from being sent over HTTP to the specified domain and will instead send all communications over HTTPS.'),
+  type=coerce_bool,
+  default=True)
+
+SECURE_CONTENT_TYPE_NOSNIFF = Config(
+  key="secure_content_type_nosniff",
+  help=_('X-Content-Type-Options: nosniff This is a HTTP response header feature that helps prevent attacks based on MIME-type confusion.'),
+  type=coerce_bool,
+  default=True)
+
+SECURE_BROWSER_XSS_FILTER = Config(
+  key="secure_browser_xss_filter",
+  help=_('X-Xss-Protection: \"1; mode=block\" This is a HTTP response header feature to force XSS protection.'),
+  type=coerce_bool,
+  default=True)
+
+SECURE_CONTENT_SECURITY_POLICY = Config(
+  key="secure_content_security_policy",
+  help=_('X-Content-Type-Options: nosniff This is a HTTP response header feature that helps prevent attacks based on MIME-type confusion.'),
+  type=str,
+  default="script-src 'self' 'unsafe-inline' 'unsafe-eval' *.google-analytics.com *.doubleclick.net *.mathjax.org data:;"+
+          "img-src 'self' *.google-analytics.com *.doubleclick.net data:;"+
+          "style-src 'self' 'unsafe-inline';"+
+          "connect-src 'self';"+
+          "child-src 'none';"+
+          "object-src 'none'")
+
+SECURE_SSL_REDIRECT = Config(
+  key="secure_ssl_redirect",
+  help=_('If all non-SSL requests should be permanently redirected to SSL.'),
+  type=coerce_bool,
+  dynamic_default=is_https_enabled)
+
+SECURE_SSL_HOST = Config(
+  key="secure_redirect_host",
+  help=_('If all non-SSL requests should be permanently redirected to this SSL host.'),
+  type=str,
+  default="0.0.0.0")
+
+SECURE_REDIRECT_EXEMPT = Config(
+  key="secure_redirect_exempt",
+  help=_('Comma separated list of strings representing the host/domain names that the Hue server can not serve https.'),
+  type=coerce_csv,
+  default=[])
 
 # Deprecated by AUTH_PASSWORD
 LDAP_PASSWORD = Config(
@@ -295,7 +353,7 @@ REDIRECT_WHITELIST = Config(
          "For example, to restrict to your local domain and FQDN, the following value can be used:"
          "  ^\/.*$,^http:\/\/www.mydomain.com\/.*$"),
   type=list_of_compiled_res(skip_empty=True),
-  default='^\/.*$')
+  default='^(\/[a-zA-Z0-9]+.*|\/)$')
 
 USE_X_FORWARDED_HOST = Config(
   key="use_x_forwarded_host",
@@ -336,8 +394,17 @@ ALLOWED_HOSTS = Config(
   help=_('Comma separated list of strings representing the host/domain names that the Hue server can serve.')
 )
 
-def is_https_enabled():
-  return bool(SSL_CERTIFICATE.get() and SSL_PRIVATE_KEY.get())
+def default_secure_cookie():
+  """Enable secure cookies if HTTPS is enabled."""
+  return is_https_enabled()
+
+def default_ssl_cacerts():
+  """Path to default Certificate Authority certificates"""
+  return SSL_CACERTS.get()
+
+def default_ssl_validate():
+  """Choose whether Hue should validate certificates received from the server."""
+  return SSL_VALIDATE.get()
 
 #
 # Email (SMTP) settings
@@ -364,20 +431,9 @@ def default_database_options():
   else:
     return {}
 
-
-def default_secure_cookie():
-  """Enable secure cookies if HTTPS is enabled."""
-  return is_https_enabled()
-
-
-def default_ssl_cacerts():
-  """Path to default Certificate Authority certificates"""
-  return SSL_CACERTS.get()
-
-
-def default_ssl_validate():
-  """Choose whether Hue should validate certificates received from the server."""
-  return SSL_VALIDATE.get()
+def get_deprecated_login_lock_out_by_combination_browser_user_agent():
+  """Return value of deprecated LOGIN_LOCK_OUT_BY_COMBINATION_BROWSER_USER_AGENT_AND_IP config"""
+  return AUTH.LOGIN_LOCK_OUT_BY_COMBINATION_BROWSER_USER_AGENT_AND_IP.get()
 
 
 SMTP = ConfigSection(
@@ -505,7 +561,7 @@ DATABASE = ConfigSection(
       key='port',
       help=_('Database port.'),
       type=coerce_port,
-      default='0',
+      default='',
     ),
     OPTIONS=Config(
       key='options',
@@ -677,6 +733,10 @@ AUTH = ConfigSection(
                                       help=_("Force usernames to lowercase when creating new users."),
                                       type=coerce_bool,
                                       default=True),
+    FORCE_USERNAME_UPPERCASE = Config("force_username_uppercase",
+                                      help=_("Force usernames to uppercase when creating new users."),
+                                      type=coerce_bool,
+                                      default=False),
     EXPIRES_AFTER = Config("expires_after",
                             help=_("Users will expire after they have not logged in for 'n' amount of seconds."
                                    "A negative number means that users will never expire."),
@@ -717,11 +777,19 @@ AUTH = ConfigSection(
       type=coerce_timedelta,
       default=None,
     ),
-    LOGIN_LOCK_OUT_BY_COMBINATION_BROWSER_USER_AGENT_AND_IP = Config(
+    # Deprecated by LOGIN_LOCK_OUT_USE_USER_AGENT
+    LOGIN_LOCK_OUT_BY_COMBINATION_BROWSER_USER_AGENT_AND_IP=Config(
       key="login_lock_out_by_combination_browser_user_agent_and_ip",
       help=_("If True, lock out based on IP and browser user agent"),
       type=coerce_bool,
       default=False,
+    ),
+    LOGIN_LOCK_OUT_USE_USER_AGENT = Config(
+      key="login_lock_out_use_user_agent",
+      help=_("If True, lock out based on an IP address AND a user agent."
+             "This means requests from different user agents but from the same IP are treated differently."),
+      type=coerce_bool,
+      dynamic_default=get_deprecated_login_lock_out_by_combination_browser_user_agent
     ),
     LOGIN_LOCK_OUT_BY_COMBINATION_USER_AND_IP = Config(
       key="login_lock_out_by_combination_user_and_ip",
@@ -730,6 +798,7 @@ AUTH = ConfigSection(
       default=False,
     ),
 ))
+
 
 LDAP = ConfigSection(
   key="ldap",
@@ -751,6 +820,10 @@ LDAP = ConfigSection(
       help=_("Force usernames to lowercase when creating new users from LDAP."),
       type=coerce_bool,
       default=True),
+    FORCE_USERNAME_UPPERCASE = Config("force_username_uppercase",
+      help=_("Force usernames to uppercase when creating new users from LDAP."),
+      type=coerce_bool,
+      default=False),
     SUBGROUPS = Config("subgroups",
       help=_("Choose which kind of subgrouping to use: nested or suboordinate (deprecated)."),
       type=coerce_str_lowercase,
@@ -1077,11 +1150,32 @@ DJANGO_EMAIL_BACKEND = Config(
   default="django.core.mail.backends.smtp.EmailBackend"
 )
 
+USE_NEW_AUTOCOMPLETER = Config( # To remove when it's working properly, not supported by old editor
+  key='use_new_autocompleter',
+  default=True,
+  type=coerce_bool,
+  help=_('Enable the new editor SQL autocompleter')
+)
+
+EDITOR_AUTOCOMPLETE_TIMEOUT = Config(
+  key='editor_autocomplete_timeout',
+  type=int,
+  default=3000,
+  help=_('Timeout value in ms for autocomplete of columns, tables, values etc. 0 = disabled')
+)
+
 USE_NEW_EDITOR = Config( # To remove in Hue 4
   key='use_new_editor',
   default=True,
   type=coerce_bool,
   help=_('Choose whether to show the new SQL editor.')
+)
+
+USE_DEFAULT_CONFIGURATION = Config(
+  key='use_default_configuration',
+  default=False,
+  type=coerce_bool,
+  help=_('Enable saved default configurations for Hive, Impala, Spark, and Oozie.')
 )
 
 def validate_ldap(user, config):
@@ -1153,7 +1247,8 @@ def validate_database():
       except Exception, ex:
         LOG.exception("Error in config validation of MYSQL_STORAGE_ENGINE: %s", ex)
   elif 'sqlite' in connection.vendor:
-    res.append(('SQLITE_NOT_FOR_PRODUCTION_USE', unicode(_('SQLite is only recommended for small development environments with a few users.'))))
+    res.append(('SQLITE_NOT_FOR_PRODUCTION_USE', unicode(_('SQLite is only recommended for development environments. '
+        'It might cause the "Database is locked" error. Migrating to MySQL, Oracle or PostgreSQL is strongly recommended.'))))
   return res
 
 

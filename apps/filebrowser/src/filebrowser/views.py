@@ -16,7 +16,6 @@
 # limitations under the License.
 
 import errno
-import json
 import logging
 import mimetypes
 import operator
@@ -26,6 +25,7 @@ import posixpath
 import re
 import shutil
 import stat as stat_module
+import urllib
 
 from datetime import datetime
 
@@ -37,7 +37,6 @@ from django.http import Http404, HttpResponse, HttpResponseNotModified
 from django.views.decorators.http import require_http_methods
 from django.views.static import was_modified_since
 from django.shortcuts import redirect
-from django.template.defaultfilters import urlencode
 from django.utils.functional import curry
 from django.utils.http import http_date
 from django.utils.html import escape
@@ -46,6 +45,7 @@ from cStringIO import StringIO
 from gzip import GzipFile
 from avro import datafile, io
 
+from aws.s3.s3fs import S3FileSystemException
 from desktop import appmanager
 from desktop.lib import i18n, paginator
 from desktop.lib.conf import coerce_bool
@@ -165,6 +165,9 @@ def view(request, path):
             return format_preserving_redirect(request, reverse(view, kwargs=dict(path=request.fs.trash_path)))
 
     try:
+        decoded_path = urllib.unquote(path)
+        if path != decoded_path:
+          path = decoded_path
         stats = request.fs.stats(path)
         if stats.isDir:
             return listdir_paged(request, path)
@@ -331,7 +334,7 @@ def listdir(request, path, chooser):
 
     # Include parent dir, unless at filesystem root.
     if not request.fs.isroot(path):
-        parent_path = request.fs.join(path, "..")
+        parent_path = request.fs.parent_path(path)
         parent_stat = request.fs.stats(parent_path)
         # The 'path' field would be absolute, but we want its basename to be
         # actually '..' for display purposes. Encode it since _massage_stats expects byte strings.
@@ -415,7 +418,7 @@ def listdir_paged(request, path):
 
     # Include parent dir always as second option, unless at filesystem root.
     if not request.fs.isroot(path):
-        parent_path = request.fs.join(path, "..")
+        parent_path = request.fs.parent_path(path)
         parent_stat = request.fs.stats(parent_path)
         # The 'path' field would be absolute, but we want its basename to be
         # actually '..' for display purposes. Encode it since _massage_stats expects byte strings.
@@ -433,16 +436,18 @@ def listdir_paged(request, path):
 
     page.object_list = [ _massage_stats(request, s) for s in shown_stats ]
 
+    is_trash_enabled = request.fs._get_scheme(path) == 'hdfs'
+
     is_fs_superuser = _is_hdfs_superuser(request)
     data = {
         'path': path,
         'breadcrumbs': breadcrumbs,
         'current_request_path': request.path,
+        'is_trash_enabled': is_trash_enabled,
         'files': page.object_list,
         'page': _massage_page(page),
         'pagesize': pagesize,
         'home_directory': request.fs.isdir(home_dir_path) and home_dir_path or None,
-        'sortby': sortby,
         'descending': descending_param,
         # The following should probably be deprecated
         'cwd_set': True,
@@ -491,7 +496,7 @@ def _massage_stats(request, stats):
         'path': normalized,
         'name': stats['name'],
         'stats': stats.to_json_dict(),
-        'mtime': datetime.fromtimestamp(stats['mtime']).strftime('%B %d, %Y %I:%M %p'),
+        'mtime': datetime.fromtimestamp(stats['mtime']).strftime('%B %d, %Y %I:%M %p') if stats['mtime'] is not None else '',
         'humansize': filesizeformat(stats['size']),
         'type': filetype(stats['mode']),
         'rwx': rwx(stats['mode'], stats['aclBit']),
@@ -517,8 +522,15 @@ def stat(request, path):
 def content_summary(request, path):
     if not request.fs.exists(path):
         raise Http404(_("File not found: %(path)s") % {'path': escape(path)})
-    stats = request.fs.get_content_summary(path)
-    return JsonResponse(stats.summary)
+
+    response = {'status': -1, 'message': '', 'summary': None}
+    try:
+        stats = request.fs.get_content_summary(path)
+        response['status'] = 0
+        response['summary'] = stats.summary
+    except WebHdfsException, e:
+        response['message'] = _("The file could not be saved") + e.message.splitlines()[0]
+    return JsonResponse(response)
 
 
 def display(request, path):
@@ -968,10 +980,18 @@ def generic_op(form_class, request, op, parameter_names, piggyback=None, templat
                 op(*args)
             except (IOError, WebHdfsException), e:
                 msg = _("Cannot perform operation.")
+                # TODO: Only apply this message for HDFS
                 if request.user.is_superuser and not _is_hdfs_superuser(request):
                     msg += _(' Note: you are a Hue admin but not a HDFS superuser, "%(superuser)s" or part of HDFS supergroup, "%(supergroup)s".') \
                            % {'superuser': request.fs.superuser, 'supergroup': request.fs.supergroup}
                 raise PopupException(msg, detail=e)
+            except S3FileSystemException, e:
+              msg = _("S3 filesystem exception.")
+              raise PopupException(msg, detail=e)
+            except NotImplementedError, e:
+                msg = _("Cannot perform operation.")
+                raise PopupException(msg, detail=e)
+
             if next:
                 logging.debug("Next: %s" % next)
                 # Doesn't need to be quoted: quoting is done by HttpResponseRedirect.
@@ -1005,7 +1025,9 @@ def rename(request):
           raise PopupException(_("Could not rename folder \"%s\" to \"%s\": Hashes are not allowed in filenames." % (src_path, dest_path)))
         if "/" not in dest_path:
             src_dir = os.path.dirname(src_path)
-            dest_path = os.path.join(src_dir, dest_path)
+            dest_path = request.fs.join(src_dir, dest_path)
+        if request.fs.exists(dest_path):
+          raise PopupException(_('The destination path "%s" already exists.') % dest_path)
         request.fs.rename(src_path, dest_path)
 
     return generic_op(RenameForm, request, smart_rename, ["src_path", "dest_path"], None)
@@ -1017,7 +1039,7 @@ def mkdir(request):
         # No absolute directory specification allowed.
         if posixpath.sep in name or "#" in name:
             raise PopupException(_("Could not name folder \"%s\": Slashes or hashes are not allowed in filenames." % name))
-        request.fs.mkdir(os.path.join(path, name))
+        request.fs.mkdir(request.fs.join(path, name))
 
     return generic_op(MkDirForm, request, smart_mkdir, ["path", "name"], "path")
 
@@ -1027,7 +1049,7 @@ def touch(request):
         # No absolute path specification allowed.
         if posixpath.sep in name:
             raise PopupException(_("Could not name file \"%s\": Slashes are not allowed in filenames." % name))
-        request.fs.create(os.path.join(path, name))
+        request.fs.create(request.fs.join(path, name))
 
     return generic_op(TouchForm, request, smart_touch, ["path", "name"], "path")
 
@@ -1129,6 +1151,7 @@ def trash_purge(request):
     return generic_op(TrashPurgeForm, request, request.fs.purge_trash, [], None)
 
 
+@require_http_methods(["POST"])
 def upload_file(request):
     """
     A wrapper around the actual upload view function to clean up the temporary file afterwards if it fails.
@@ -1138,19 +1161,17 @@ def upload_file(request):
     """
     response = {'status': -1, 'data': ''}
 
-    if request.method == 'POST':
-        try:
-            resp = _upload_file(request)
-            response.update(resp)
-        except Exception, ex:
-            response['data'] = str(ex).split('\n', 1)[0]
-            hdfs_file = request.FILES.get('hdfs_file')
-            if hdfs_file:
-                hdfs_file.remove()
-    else:
-        response['data'] = _('A POST request is required.')
+    try:
+        resp = _upload_file(request)
+        response.update(resp)
+    except Exception, ex:
+        response['data'] = str(ex).split('\n', 1)[0]
+        hdfs_file = request.FILES.get('hdfs_file')
+        if hdfs_file and hasattr(hdfs_file, 'remove'):  # TODO: Call from proxyFS
+            hdfs_file.remove()
 
-    return HttpResponse(json.dumps(response), content_type="text/plain")
+    return JsonResponse(response)
+
 
 def _upload_file(request):
     """
@@ -1168,17 +1189,13 @@ def _upload_file(request):
     if form.is_valid():
         uploaded_file = request.FILES['hdfs_file']
         dest = form.cleaned_data['dest']
+        filepath = request.fs.join(dest, uploaded_file.name)
 
         if request.fs.isdir(dest) and posixpath.sep in uploaded_file.name:
             raise PopupException(_('Sorry, no "%(sep)s" in the filename %(name)s.' % {'sep': posixpath.sep, 'name': uploaded_file.name}))
 
-        dest = request.fs.join(dest, uploaded_file.name)
-        tmp_file = uploaded_file.get_temp_path()
-        username = request.user.username
-
         try:
-            # Remove tmp suffix of the file
-            request.fs.do_as_user(username, request.fs.rename, tmp_file, dest)
+            request.fs.upload(file=uploaded_file, path=dest, username=request.user.username)
             response['status'] = 0
         except IOError, ex:
             already_exists = False
@@ -1193,8 +1210,8 @@ def _upload_file(request):
             raise PopupException(msg)
 
         response.update({
-          'path': dest,
-          'result': _massage_stats(request, request.fs.stats(dest)),
+          'path': filepath,
+          'result': _massage_stats(request, request.fs.stats(filepath)),
           'next': request.GET.get("next")
         })
 
@@ -1203,6 +1220,7 @@ def _upload_file(request):
         raise PopupException(_("Error in upload form: %s") % (form.errors,))
 
 
+@require_http_methods(["POST"])
 def upload_archive(request):
     """
     A wrapper around the actual upload view function to clean up the temporary file afterwards.
@@ -1212,21 +1230,18 @@ def upload_archive(request):
     """
     response = {'status': -1, 'data': ''}
 
-    if request.method == 'POST':
+    try:
         try:
-            try:
-                resp = _upload_archive(request)
-                response.update(resp)
-            except Exception, ex:
-                response['data'] = str(ex)
-        finally:
-            hdfs_file = request.FILES.get('hdfs_file')
-            if hdfs_file:
-                hdfs_file.remove()
-    else:
-        response['data'] = _('A POST request is required.')
+            resp = _upload_archive(request)
+            response.update(resp)
+        except Exception, ex:
+            response['data'] = str(ex)
+    finally:
+        hdfs_file = request.FILES.get('hdfs_file')
+        if hdfs_file:
+            hdfs_file.remove()
 
-    return HttpResponse(json.dumps(response), content_type="text/plain")
+    return JsonResponse(response)
 
 
 def _upload_archive(request):

@@ -55,6 +55,8 @@
     self.editingSearch = ko.observable(false);
     self.sourceType = self.assistDbSource.sourceType;
     self.invalidateOnRefresh =  self.assistDbSource.invalidateOnRefresh;
+    self.highlight = ko.observable(false);
+    self.highlightParent = ko.observable(false);
 
     self.expandable = typeof definition.type === "undefined" || /table|view|struct|array|map/i.test(definition.type);
 
@@ -87,7 +89,7 @@
         if ((entry.definition.isTable && !self.filter.showTables()) || (entry.definition.isView && !self.filter.showViews()) ) {
           return;
         }
-        if (entry.definition.name.toLowerCase().indexOf(self.filter.query()) > -1) {
+        if (entry.definition.name.toLowerCase().indexOf(self.filter.query().toLowerCase()) > -1) {
           result.push(entry);
         }
       });
@@ -136,7 +138,7 @@
     });
   }
 
-  AssistDbEntry.prototype.toggleSearch = function() {
+  AssistDbEntry.prototype.toggleSearch = function () {
     var self = this;
     self.isSearchVisible(!self.isSearchVisible());
     self.editingSearch(self.isSearchVisible());
@@ -147,7 +149,40 @@
     self.assistDbSource.triggerRefresh();
   };
 
-  AssistDbEntry.prototype.loadEntries = function() {
+  AssistDbEntry.prototype.highlightInside = function (path) {
+    var self = this;
+
+    var searchEntry = function () {
+      var foundEntry;
+      $.each(self.entries(), function (idx, entry) {
+        if (entry.definition.name === path[0]) {
+          foundEntry = entry;
+          entry.open(true);
+          return false;
+        }
+      });
+      if (foundEntry) {
+        if (path.length > 1) {
+          foundEntry.highlightParent(true);
+          huePubSub.publish('assist.db.scrollToHighlight');
+          window.setTimeout(function () {
+            foundEntry.highlightInside(path.slice(1));
+          }, 0);
+        } else {
+          foundEntry.highlight(true);
+          huePubSub.publish('assist.db.scrollToHighlight');
+        }
+      }
+    };
+
+    if (self.entries().length == 0) {
+      self.loadEntries(searchEntry);
+    } else {
+      searchEntry();
+    }
+  };
+
+  AssistDbEntry.prototype.loadEntries = function(callback) {
     var self = this;
     if (!self.expandable || self.loading()) {
       return;
@@ -247,10 +282,16 @@
       }
 
       newEntries.sort(function (a, b) {
+        if (a.definition.isColumn && b.definition.isColumn) {
+          return 0;
+        }
         return a.definition.name.localeCompare(b.definition.name);
       });
 
       self.entries(newEntries);
+      if (typeof callback === 'function') {
+        callback();
+      }
     };
 
     var errorCallback = function () {
@@ -258,7 +299,7 @@
       self.loading(false);
     };
 
-    self.assistDbSource.assistHelper.fetchPanelData({
+    self.assistDbSource.apiHelper.fetchPanelData({
       sourceType: self.assistDbSource.sourceType,
       hierarchy: self.getHierarchy(),
       successCallback: successCallback,
@@ -317,42 +358,6 @@
         name: self.definition.name
       })
     }
-  };
-
-  AssistDbEntry.prototype.showPreview = function () {
-    var self = this;
-    var $assistQuickLook = $("#assistQuickLook");
-
-    var hierarchy = self.getHierarchy();
-    var databaseName = hierarchy[0];
-    var tableName = hierarchy[1];
-
-    $assistQuickLook.find(".tableName").text(self.definition.name);
-    $assistQuickLook.find(".tableLink").attr("href", "/metastore/table/" + databaseName + "/" + tableName);
-    self.assistDbSource.loadingSamples(true);
-    self.assistDbSource.samples({});
-    $assistQuickLook.attr("style", "width: " + ($(window).width() - 120) + "px;margin-left:-" + (($(window).width() - 80) / 2) + "px!important;");
-
-    self.assistDbSource.assistHelper.fetchTableSample({
-      sourceType: self.assistDbSource.sourceType === "hive" ? "beeswax" : self.assistDbSource.sourceType,
-      databaseName: databaseName,
-      tableName: tableName,
-      dataType: "html",
-      successCallback: function(data) {
-        if (! data.rows) {
-          data.rows = [];
-        } else if (! data.headers) {
-          data.headers = [];
-        }
-        self.assistDbSource.samples(data);
-        self.assistDbSource.loadingSamples(false);
-      },
-      errorCallback: function(e) {
-        $("#assistQuickLook").modal("hide");
-      }
-    });
-
-    $assistQuickLook.modal("show");
   };
 
   return AssistDbEntry;

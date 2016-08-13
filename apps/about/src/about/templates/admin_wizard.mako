@@ -188,7 +188,7 @@ ${ header.menubar() }
               <h2 class="card-heading simple">${ _('Use the applications') }</h2>
 
               <div class="card-body">
-                <a href="${ url('desktop.views.home') }" style="padding-left: 2px; line-height: 24px; margin-right: 4px"><i class="fa fa-home" style="font-size: 24px; color: #338bb8; vertical-align: middle;"></i> ${ _('Hue Home') }</a>
+                <a href="${ url('desktop.views.home2') }" style="padding-left: 2px; line-height: 24px; margin-right: 4px"><i class="fa fa-home" style="font-size: 24px; color: #338bb8; vertical-align: middle;"></i> ${ _('Hue Home') }</a>
               </div>
             </div>
 
@@ -225,7 +225,7 @@ ${ header.menubar() }
           <span class="muted">${ _('Hue and the Hue logo are trademarks of Cloudera, Inc.') }</span>
           % if not user.is_authenticated():
             <br/>
-            <a href="${ reverse('desktop.views.home') }" class="btn btn-primary" style="margin-top: 50px;margin-bottom: 20px"><i class="fa fa-sign-in"></i> ${ _('Sign in now!') }</a>
+            <a href="${ url('desktop.views.home2') }" class="btn btn-primary" style="margin-top: 50px;margin-bottom: 20px"><i class="fa fa-sign-in"></i> ${ _('Sign in now!') }</a>
           % endif
         </p>
        </div>

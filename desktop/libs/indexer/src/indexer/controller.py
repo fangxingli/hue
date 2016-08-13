@@ -25,9 +25,11 @@ from django.utils.translation import ugettext as _
 
 from desktop.lib.exceptions_renderable import PopupException
 from libsolr.api import SolrApi
+from libsolr.conf import SOLR_ZK_PATH
 from libzookeeper.conf import ENSEMBLE
 from libzookeeper.models import ZookeeperClient
 from search.conf import SOLR_URL, SECURITY_ENABLED
+from search.models import Collection2
 
 from indexer.conf import CORE_INSTANCE_DIR
 from indexer.utils import copy_configs, field_values_from_log, field_values_from_separated_file
@@ -41,7 +43,7 @@ ZK_SOLR_CONFIG_NAMESPACE = 'configs'
 
 
 def get_solr_ensemble():
-  return '%s/solr' % ENSEMBLE.get()
+  return '%s%s' % (ENSEMBLE.get(), SOLR_ZK_PATH.get())
 
 
 class CollectionManagerController(object):
@@ -52,10 +54,10 @@ class CollectionManagerController(object):
     self.user = user
 
   def _format_flags(self, fields):
-    for field_name, field in fields.items():
-      for index in range(0, len(FLAGS)):
-        flags = FLAGS[index]
-        field[flags[1]] = field['flags'][index] == FLAGS[index][0]
+    for name, properties in fields.items():
+      for (code, value) in FLAGS:
+        if code in properties['flags']:
+          properties[value] = True  # Add a new key-value boolean for the decoded flag
     return fields
 
   def is_solr_cloud_mode(self):
@@ -73,6 +75,10 @@ class CollectionManagerController(object):
     return collection in self.get_collections()
 
   def get_collections(self):
+    solr_collections = {}
+    solr_aliases = {}
+    solr_cores = {}
+
     try:
       api = SolrApi(SOLR_URL.get(), self.user, SECURITY_ENABLED.get())
 
@@ -83,10 +89,6 @@ class CollectionManagerController(object):
       else:
         solr_collections = {}
 
-      solr_cores = api.cores()
-      for name in solr_cores:
-        solr_cores[name]['isCoreOnly'] = True
-
       solr_aliases = api.aliases()
       for name in solr_aliases:
         solr_aliases[name] = {
@@ -94,26 +96,46 @@ class CollectionManagerController(object):
             'isAlias': True,
             'collections': solr_aliases[name]
         }
+
+      solr_cores = api.cores()
+      for name in solr_cores:
+        solr_cores[name]['isCoreOnly'] = True
     except Exception, e:
       LOG.warn('No Zookeeper servlet running on Solr server: %s' % e)
-      solr_collections = {}
-      solr_cores = {}
-      solr_aliases = {}
 
     solr_cores.update(solr_collections)
     solr_cores.update(solr_aliases)
     return solr_cores
 
-  def get_fields(self, collection_or_core_name):
+  def get_autocomplete(self):
+    autocomplete = {}
     try:
-      field_data = SolrApi(SOLR_URL.get(), self.user, SECURITY_ENABLED.get()).fields(collection_or_core_name)
-      fields = self._format_flags(field_data['schema']['fields'])
-    except:
-      LOG.exception(_('Could not fetch fields for collection %s.') % collection_or_core_name)
-      raise PopupException(_('Could not fetch fields for collection %s. See logs for more info.') % collection_or_core_name)
+      api = SolrApi(SOLR_URL.get(), self.user, SECURITY_ENABLED.get())
+      autocomplete['collections'] = api.collections2()
+      autocomplete['configs'] = api.configs()
+
+    except Exception, e:
+      LOG.warn('No Zookeeper servlet running on Solr server: %s' % e)
+
+    return autocomplete
+
+  def get_fields(self, collection_or_core_name):
+    api = SolrApi(SOLR_URL.get(), self.user, SECURITY_ENABLED.get())
 
     try:
-      uniquekey = SolrApi(SOLR_URL.get(), self.user, SECURITY_ENABLED.get()).uniquekey(collection_or_core_name)
+      field_data = api.fields(collection_or_core_name)
+      fields = self._format_flags(field_data['schema']['fields'])
+    except Exception, e:
+      LOG.warn('/luke call did not succeed: %s' % e)
+      try:
+        fields = api.schema_fields(collection_or_core_name)
+        fields = Collection2._make_luke_from_schema_fields(fields)
+      except:
+        LOG.exception(_('Could not fetch fields for collection %s.') % collection_or_core_name)
+        raise PopupException(_('Could not fetch fields for collection %s. See logs for more info.') % collection_or_core_name)
+
+    try:
+      uniquekey = api.uniquekey(collection_or_core_name)
     except:
       LOG.exception(_('Could not fetch unique key for collection %s.') % collection_or_core_name)
       raise PopupException(_('Could not fetch unique key for collection %s. See logs for more info.') % collection_or_core_name)
@@ -139,6 +161,7 @@ class CollectionManagerController(object):
         config_root_path = '%s/%s' % (solr_config_path, 'conf')
         try:
           zc.copy_path(root_node, config_root_path)
+
         except Exception, e:
           zc.delete_path(root_node)
           raise PopupException(_('Error in copying Solr configurations.'), detail=e)

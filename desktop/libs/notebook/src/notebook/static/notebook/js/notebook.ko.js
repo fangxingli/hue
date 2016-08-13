@@ -16,14 +16,25 @@
 
 (function (root, factory) {
   if(typeof define === "function" && define.amd) {
-    define(['knockout', 'desktop/js/assist/assistHelper', 'desktop/js/autocompleter', 'knockout-mapping', 'ko.charts'], factory);
+    define([
+      'knockout',
+      'desktop/js/apiHelper',
+      'desktop/js/autocompleter',
+      'knockout-mapping',
+      'ko.charts'
+    ], factory);
   } else {
-    root.EditorViewModel = factory(ko, AssistHelper, Autocompleter);
+    root.EditorViewModel = factory(ko, ApiHelper, Autocompleter);
   }
-}(this, function (ko, AssistHelper, Autocompleter) {
+}(this, function (ko, ApiHelper, Autocompleter) {
 
-  var SPARK_MAPPING = {
-    ignore: ["ace", "images", "autocompleter", "selectedStatement", "assistHelpers", "user", "inFocus", "history", "availableSnippets"]
+  var NOTEBOOK_MAPPING = {
+    ignore: [
+      "ace", "autocompleter", "availableSnippets", "history", "images", "inFocus", "selectedStatement", "user",
+      "availableDatabases", "hasProperties", "aceMode", "snippetImage", "errorLoadingQueries",
+      "cleanedStringMeta", "cleanedDateTimeMeta", "cleanedMeta", "cleanedNumericMeta",
+      "dependents", "canWrite", "queries"
+    ]
   };
 
   var Result = function (snippet, result) {
@@ -37,12 +48,48 @@
     self.meta = ko.observableArray(typeof result.meta != "undefined" && result.meta != null ? result.meta : []);
     self.hasMore = ko.observable(typeof result.hasMore != "undefined" && result.hasMore != null ? result.hasMore : false);
     self.statement_id = ko.observable(typeof result.statement_id != "undefined" && result.statement_id != null ? result.statement_id : 0);
+    self.statement_range = ko.observable(typeof result.statement_range != "undefined" && result.statement_range != null ? result.statement_range : {
+      start: {
+        row: 0,
+        column: 0
+      },
+      end: {
+        row: 0,
+        column: 0
+      }
+    });
     self.statements_count = ko.observable(typeof result.statements_count != "undefined" && result.statements_count != null ? result.statements_count : 1);
     self.cleanedMeta = ko.computed(function () {
       return ko.utils.arrayFilter(self.meta(), function (item) {
         return item.name != ''
       });
     });
+    self.metaFilter = ko.observable('');
+    self.isMetaFilterVisible = ko.observable(false);
+    self.filteredMetaChecked = ko.observable(true);
+    self.filteredMeta = ko.pureComputed(function () {
+      return ko.utils.arrayFilter(self.meta(), function (item, i) {
+        if (typeof item.checked === 'undefined') {
+          item.checked = ko.observable(true);
+          item.checked.subscribe(function () {
+            self.filteredMetaChecked(ko.utils.arrayFilter(self.filteredMeta(), function (item) {
+                return !item.checked();
+              }).length == 0);
+          });
+        }
+        if (typeof item.originalIndex === 'undefined') {
+          item.originalIndex = i;
+        }
+        return item.name !== '' && (item.name.toLowerCase().indexOf(self.metaFilter().toLowerCase()) > -1 || item.type.toLowerCase().indexOf(self.metaFilter().toLowerCase()) > -1);
+      });
+    });
+
+    self.clickFilteredMetaCheck = function () {
+      self.filteredMeta().forEach(function (item) {
+        item.checked(self.filteredMetaChecked());
+      });
+    };
+
     self.fetchedOnce = ko.observable(typeof result.fetchedOnce != "undefined" && result.fetchedOnce != null ? result.fetchedOnce : false);
     self.startTime = ko.observable(typeof result.startTime != "undefined" && result.startTime != null ? new Date(result.startTime) : new Date());
     self.endTime = ko.observable(typeof result.endTime != "undefined" && result.endTime != null ? new Date(result.endTime) : new Date());
@@ -82,6 +129,7 @@
 
     self.data = ko.observableArray(typeof result.data != "undefined" && result.data != null ? result.data : []);
     self.data.extend({ rateLimit: 50 });
+    self.explanation = ko.observable(typeof result.explanation != "undefined" && result.explanation != null ? result.explanation : '');
     self.images = ko.observableArray(typeof result.images != "undefined" && result.images != null ? result.images : []);
     self.images.extend({ rateLimit: 50 });
     self.logs = ko.observable('');
@@ -105,8 +153,15 @@
       self.data.removeAll();
       self.images.removeAll();
       self.logs('');
+      self.handle({ // Keep multiquery indexing
+          has_more_statements: self.handle()['has_more_statements'],
+          statement_id: self.handle()['statement_id'],
+          statements_count: self.handle()['statements_count']
+      });
       self.startTime(new Date());
       self.endTime(new Date());
+      self.explanation('');
+      self.logLines = 0;
     };
   };
 
@@ -122,7 +177,12 @@
       properties['files'] = [];
     }
 
-    if (snippetType == 'jar') {
+    if (snippetType == 'java') {
+      properties['archives'] = [];
+      properties['files'] = [];
+    }
+
+    if (snippetType == 'jar' || snippetType == 'java') {
       properties['app_jar'] = '';
       properties['class'] = '';
       properties['arguments'] = [];
@@ -148,7 +208,7 @@
     return properties;
   };
 
-  var ERROR_REGEX = /line ([0-9]+)/i;
+  var ERROR_REGEX = /line ([0-9]+)(\:([0-9]+))?/i;
 
   var Snippet = function (vm, notebook, snippet) {
     var self = this;
@@ -178,8 +238,8 @@
       return vm.getSnippetViewSettings(self.type()).placeHolder;
     };
 
-    self.getAssistHelper = function() {
-      return AssistHelper.getInstance(vm);
+    self.getApiHelper = function() {
+      return ApiHelper.getInstance(vm);
     };
 
     self.database = ko.observable(typeof snippet.database != "undefined" && snippet.database != null ? snippet.database : null);
@@ -188,7 +248,7 @@
 
     var updateDatabases = function () {
       if (self.isSqlDialect()) {
-        self.getAssistHelper().loadDatabases({
+        self.getApiHelper().loadDatabases({
           sourceType: self.type(),
           silenceErrors: true,
           successCallback: self.availableDatabases
@@ -198,7 +258,14 @@
       }
     };
 
-    self.currentQueryTab = ko.observable('queryHistory');
+    huePubSub.subscribe('assist.db.refresh', function (type) {
+      if (self.type() == type) {
+        updateDatabases();
+      }
+    });
+
+    // History is currently in Notebook, same with saved queries by snippets, might be better in assist
+    self.currentQueryTab = ko.observable(typeof snippet.currentQueryTab != "undefined" && snippet.currentQueryTab != null ? snippet.currentQueryTab : 'queryHistory');
 
     self.errorLoadingQueries = ko.observable(false);
     self.loadingQueries = ko.observable(false);
@@ -206,18 +273,26 @@
     self.queriesHasErrors = ko.observable(false);
     self.queriesCurrentPage = ko.observable(1);
     self.queriesTotalPages = ko.observable(1);
-    self.queries = ko.observableArray();
+    self.queries = ko.observableArray([]);
 
-    var fetchQueries = function () {
+    self.queriesFilter = ko.observable('');
+    self.queriesFilterVisible = ko.observable(false);
+    self.queriesFilter.extend({ rateLimit: 300 });
+    self.queriesFilter.subscribe(function(val){
+      self.fetchQueries();
+    });
+
+    self.fetchQueries = function () {
+      var QUERIES_PER_PAGE = 50;
       if (self.loadingQueries()) {
         return;
       }
       lastQueriesPage = self.queriesCurrentPage();
       self.loadingQueries(true);
       self.queriesHasErrors(false);
-      self.getAssistHelper().searchDocuments({
+      self.getApiHelper().searchDocuments({
         successCallback: function (result) {
-          self.queriesTotalPages(Math.ceil(result.count / 25));
+          self.queriesTotalPages(Math.ceil(result.count / QUERIES_PER_PAGE));
           self.queries(result.documents);
           self.loadingQueries(false);
           self.queriesHasErrors(false);
@@ -227,32 +302,34 @@
           self.queriesHasErrors(true);
         },
         page: self.queriesCurrentPage(),
-        limit: 25,
-        type: 'query-' + self.type()
+        limit: QUERIES_PER_PAGE,
+        type: 'query-' + self.type(),
+        query: self.queriesFilter(),
+        include_trashed: false
       });
     }
 
     var lastQueriesPage = 1;
     self.currentQueryTab.subscribe(function (newValue) {
+      huePubSub.publish('redraw.fixed.headers');
       if (newValue === 'savedQueries' && (self.queries().length === 0 || lastQueriesPage !== self.queriesCurrentPage())) {
-        fetchQueries();
+        self.fetchQueries();
       }
     });
 
     self.prevQueriesPage = function () {
       if (self.queriesCurrentPage() !== 1) {
         self.queriesCurrentPage(self.queriesCurrentPage() - 1);
-        fetchQueries();
+        self.fetchQueries();
       }
     };
 
     self.nextQueriesPage = function () {
       if (self.queriesCurrentPage() !== self.queriesTotalPages()) {
         self.queriesCurrentPage(self.queriesCurrentPage() + 1);
-        fetchQueries();
+        self.fetchQueries();
       }
     };
-
 
     self.isSqlDialect.subscribe(updateDatabases);
     updateDatabases();
@@ -275,6 +352,7 @@
     self.aceSize = ko.observable(typeof snippet.aceSize != "undefined" && snippet.aceSize != null ? snippet.aceSize : 100);
     // self.statement_raw.extend({ rateLimit: 150 }); // Should prevent lag from typing but currently send the old query when using the key shortcut
     self.status = ko.observable(typeof snippet.status != "undefined" && snippet.status != null ? snippet.status : 'loading');
+    self.statusForButtons = ko.observable('executed');
 
     self.properties = ko.observable(ko.mapping.fromJS(typeof snippet.properties != "undefined" && snippet.properties != null ? snippet.properties : getDefaultSnippetProperties(self.type())));
     self.hasProperties = ko.computed(function() {
@@ -304,13 +382,18 @@
       }, 100);
     });
 
-    self.variables = ko.observableArray([]);
+    self.variables = ko.mapping.fromJS(typeof snippet.variables != "undefined" && snippet.variables != null ? snippet.variables : []);
+    self.variables.subscribe(function (newValue) {
+      $(document).trigger("updateResultHeaders", self);
+    });
     self.variableNames = ko.computed(function () {
       var re = /(?:^|\W)\${(\w+)(?!\w)}/g;
 
       var match, matches = [];
       while (match = re.exec(self.statement_raw())) {
-        matches.push(match[1]);
+        if (matches.indexOf(match[1]) == -1) {
+          matches.push(match[1]);
+        }
       }
       return matches;
     });
@@ -319,35 +402,43 @@
       var toDelete = [];
       var toAdd = [];
 
-      $.each(newVal, function (key, name) {
-        var match = ko.utils.arrayFirst(self.variables(), function (_var) {
-          return _var.name() == name;
+      if (newVal.length == self.variables().length) { // Just rename one of the variable
+        $.each(newVal, function(i, item) {
+          self.variables()[i].name(newVal[i]);
         });
-        if (!match) {
-          toAdd.push(name);
-        }
-      });
-      $.each(self.variables(), function (key, _var) {
-        var match = ko.utils.arrayFirst(newVal, function (name) {
-          return _var.name() == name;
+      } else {
+        $.each(newVal, function (key, name) {
+          var match = ko.utils.arrayFirst(self.variables(), function (_var) {
+            return _var.name() == name;
+          });
+          if (! match) {
+            toAdd.push(name);
+          }
         });
-        if (!match) {
-          toDelete.push(_var);
-        }
-      });
+        $.each(self.variables(), function (key, _var) {
+          var match = ko.utils.arrayFirst(newVal, function (name) {
+            return _var.name() == name;
+          });
+          if (! match) {
+            toDelete.push(_var);
+          }
+        });
 
-      $.each(toDelete, function (index, item) {
-        self.variables.remove(item);
-      });
-      $.each(toAdd, function (index, item) {
-        self.variables.push(ko.mapping.fromJS({'name': item, 'value': ''}));
-      });
+        $.each(toDelete, function (index, item) {
+          self.variables.remove(item);
+        });
+        $.each(toAdd, function (index, item) {
+          self.variables.push(ko.mapping.fromJS({'name': item, 'value': ''}));
+        });
+      }
 
-      self.variables.sort(function (left, right) {
-        var leftIndex = newVal.indexOf(left.name());
-        var rightIndex = newVal.indexOf(right.name());
-        return leftIndex == rightIndex ? 0 : (leftIndex < rightIndex ? -1 : 1);
-      });
+     if (toDelete.length > 0 || toAdd.length > 0) { // Only re-update observable when changed
+        self.variables.sort(function (left, right) {
+          var leftIndex = newVal.indexOf(left.name());
+          var rightIndex = newVal.indexOf(right.name());
+          return leftIndex == rightIndex ? 0 : (leftIndex < rightIndex ? -1 : 1);
+        });
+      }
     });
     self.statement = ko.computed(function () {
       var statement = self.isSqlDialect() && self.selectedStatement() ? self.selectedStatement() : self.statement_raw();
@@ -356,12 +447,33 @@
       });
       return statement;
     });
+    if (vm.isOptimizerEnabled()) {
+      self.delayedStatement = ko.pureComputed(self.statement).extend({ rateLimit: { method: "notifyWhenChangesStop", timeout: 5000 } });
+      self.delayedStatement.subscribe(function (val) {
+        self.getComplexity();
+        self.hasSuggestion(false);
+      }, self);
+    }
+
     self.result = new Result(snippet, snippet.result);
+    if (! self.result.hasSomeResults()) {
+      self.currentQueryTab('queryHistory');
+    }
     self.showGrid = ko.observable(typeof snippet.showGrid != "undefined" && snippet.showGrid != null ? snippet.showGrid : true);
     self.showChart = ko.observable(typeof snippet.showChart != "undefined" && snippet.showChart != null ? snippet.showChart : false);
-    self.showLogs = ko.observable(typeof snippet.showLogs != "undefined" && snippet.showLogs != null ? snippet.showLogs : false);
+    var defaultShowLogs = false;
+    if (vm.editorMode() && $.totalStorage('hue.editor.showLogs')) {
+      defaultShowLogs = $.totalStorage('hue.editor.showLogs');
+    }
+    self.showLogs = ko.observable(typeof snippet.showLogs != "undefined" && snippet.showLogs != null ? snippet.showLogs : defaultShowLogs);
     self.progress = ko.observable(typeof snippet.progress != "undefined" && snippet.progress != null ? snippet.progress : 0);
     self.jobs = ko.observableArray(typeof snippet.jobs != "undefined" && snippet.jobs != null ? snippet.jobs : []);
+
+    self.ddlNotification = ko.observable();
+    self.delayedDDLNotification = ko.pureComputed(self.ddlNotification).extend({ rateLimit: { method: "notifyWhenChangesStop", timeout: 5000 } });
+    self.delayedDDLNotification.subscribe(function (val) {
+      huePubSub.publish('assist.db.refresh', self.type());
+    });
 
     self.progress.subscribe(function (val) {
       $(document).trigger("progress", {data: val, snippet: self});
@@ -373,17 +485,46 @@
         $(document).trigger("gridShown", self);
       }
     });
+
+    function prepopulateChart() {
+      var type = self.chartType();
+      if (self.result.cleanedMeta().length > 0) {
+        if (self.chartX() == null && (type == ko.HUE_CHARTS.TYPES.BARCHART || type == ko.HUE_CHARTS.TYPES.PIECHART || type == ko.HUE_CHARTS.TYPES.GRADIENTMAP)) {
+          self.chartX(self.result.cleanedMeta()[0].name);
+        }
+        if (self.chartMapLabel() == null && type == ko.HUE_CHARTS.TYPES.MAP) {
+          self.chartMapLabel(self.result.cleanedMeta()[0].name);
+        }
+      }
+      if (self.result.cleanedNumericMeta().length > 0) {
+        if (self.chartX() == null && type != ko.HUE_CHARTS.TYPES.BARCHART && type != ko.HUE_CHARTS.TYPES.PIECHART && type != ko.HUE_CHARTS.TYPES.GRADIENTMAP) {
+          self.chartX(self.result.cleanedNumericMeta()[0].name);
+        }
+        if (self.chartYMulti().length == 0 && (type == ko.HUE_CHARTS.TYPES.BARCHART || type == ko.HUE_CHARTS.TYPES.LINECHART)) {
+          self.chartYMulti.push(self.result.cleanedNumericMeta()[0].name);
+        }
+        if (self.chartYSingle() == null && (type == ko.HUE_CHARTS.TYPES.PIECHART || type == ko.HUE_CHARTS.TYPES.MAP || type == ko.HUE_CHARTS.TYPES.GRADIENTMAP || type == ko.HUE_CHARTS.TYPES.SCATTERCHART)) {
+          self.chartYSingle(type == ko.HUE_CHARTS.TYPES.GRADIENTMAP ? self.result.cleanedMeta()[0].name : self.result.cleanedNumericMeta()[0].name);
+        }
+      }
+    }
+
     self.showChart.subscribe(function (val) {
       if (val) {
         self.showGrid(false);
         self.isResultSettingsVisible(true);
         $(document).trigger("forceChartDraw", self);
         $(document).trigger("chartShown", self);
+        prepopulateChart();
       }
     });
     self.showLogs.subscribe(function (val) {
+      huePubSub.publish('redraw.fixed.headers');
       if (val) {
         self.getLogs();
+      }
+      if (vm.editorMode()) {
+        $.totalStorage('hue.editor.showLogs', val);
       }
     });
 
@@ -399,12 +540,25 @@
       return self.resultsKlass() + " alert alert-error";
     });
 
+    self.is_redacted = ko.observable(typeof snippet.is_redacted != "undefined" && snippet.is_redacted != null ? snippet.is_redacted : false);
+
+    self.complexity = ko.observable(typeof snippet.complexity != "undefined" && snippet.complexity != null ? snippet.complexity : '');
+    self.complexityLevel = ko.observable(typeof snippet.complexity_level != "undefined" && snippet.complexity_level != null ? snippet.complexity_level : '');
+    self.hasComplexity = ko.computed(function () {
+      return self.complexity().length > 0;
+    });
+
+    self.suggestion = ko.observable(typeof snippet.complexity != "undefined" && snippet.complexity != null ? snippet.complexity : '');
+    self.hasSuggestion = ko.observable(false);
+
     self.chartType = ko.observable(typeof snippet.chartType != "undefined" && snippet.chartType != null ? snippet.chartType : ko.HUE_CHARTS.TYPES.BARCHART);
+    self.chartType.subscribe(prepopulateChart);
     self.chartSorting = ko.observable(typeof snippet.chartSorting != "undefined" && snippet.chartSorting != null ? snippet.chartSorting : "none");
     self.chartScatterGroup = ko.observable(typeof snippet.chartScatterGroup != "undefined" && snippet.chartScatterGroup != null ? snippet.chartScatterGroup : null);
     self.chartScatterSize = ko.observable(typeof snippet.chartScatterSize != "undefined" && snippet.chartScatterSize != null ? snippet.chartScatterSize : null);
     self.chartScope = ko.observable(typeof snippet.chartScope != "undefined" && snippet.chartScope != null ? snippet.chartScope : "world");
     self.chartX = ko.observable(typeof snippet.chartX != "undefined" && snippet.chartX != null ? snippet.chartX : null);
+    self.chartX.extend({notify: 'always'});
     self.chartYSingle = ko.observable(typeof snippet.chartYSingle != "undefined" && snippet.chartYSingle != null ? snippet.chartYSingle : null);
     self.chartYMulti = ko.observableArray(typeof snippet.chartYMulti != "undefined" && snippet.chartYMulti != null ? snippet.chartYMulti : []);
     self.chartData = ko.observableArray(typeof snippet.chartData != "undefined" && snippet.chartData != null ? snippet.chartData : []);
@@ -414,7 +568,7 @@
       if (self.chartType() == ko.HUE_CHARTS.TYPES.BARCHART || self.chartType() == ko.HUE_CHARTS.TYPES.LINECHART) {
         return typeof self.chartX() != "undefined" && self.chartX() != null && self.chartYMulti().length > 0;
       }
-      return typeof self.chartX() != "undefined" && self.chartX() != null && typeof self.chartYSingle() != "undefined" && self.chartYSingle() != null ;
+      return typeof self.chartX() != "undefined" && self.chartX() != null && typeof self.chartYSingle() != "undefined" && self.chartYSingle() != null;
     });
 
     self.hasDataForChart.subscribe(function(newValue) {
@@ -431,11 +585,42 @@
 
     self.previousChartOptions = {};
 
-    self.result.meta.subscribe(function(newValue) {
-      self.chartX(self.previousChartOptions.chartX);
-      self.chartYSingle(self.previousChartOptions.chartYSingle);
-      self.chartMapLabel(self.previousChartOptions.chartMapLabel);
-      self.chartYMulti(self.previousChartOptions.chartYMulti || []);
+    function guessMetaField(field) {
+      var _fld = null;
+      if (field) {
+        if (self.result.cleanedMeta().length > 0) {
+          self.result.cleanedMeta().forEach(function (fld) {
+            if (fld.name.toLowerCase().indexOf(field.toLowerCase()) > -1 || field.toLowerCase().indexOf(fld.name.toLowerCase()) > -1) {
+              _fld = fld.name;
+            }
+          });
+        }
+      }
+      return _fld;
+    }
+
+    function guessMetaFields(fields) {
+      var _fields = [];
+      if (fields) {
+        fields.forEach(function (fld) {
+          var _field = guessMetaField(fld);
+          if (_field) {
+            _fields.push(_field);
+          }
+        });
+      }
+      return _fields;
+    }
+
+    self.result.meta.subscribe(function (newValue) {
+      self.chartX(guessMetaField(self.previousChartOptions.chartX));
+      self.chartYSingle(guessMetaField(self.previousChartOptions.chartYSingle));
+      self.chartMapLabel(guessMetaField(self.previousChartOptions.chartMapLabel));
+      self.chartYMulti(guessMetaFields(self.previousChartOptions.chartYMulti) || []);
+      self.chartSorting(self.previousChartOptions.chartSorting);
+      self.chartScatterGroup(self.previousChartOptions.chartScatterGroup);
+      self.chartScatterSize(self.previousChartOptions.chartScatterSize);
+      self.chartScope(self.previousChartOptions.chartScope);
     });
 
     self.isResultSettingsVisible = ko.observable(typeof snippet.isResultSettingsVisible != "undefined" && snippet.isResultSettingsVisible != null ? snippet.isResultSettingsVisible : false);
@@ -458,7 +643,8 @@
         statement: self.statement,
         properties: self.properties,
         result: self.result.getContext(),
-        database: self.database
+        database: self.database,
+        wasBatchExecuted: self.wasBatchExecuted()
       };
     };
 
@@ -474,6 +660,19 @@
       else if (data.status == -3) { // Statement expired
         self.status('expired');
       }
+      else if (data.status == -4) { // Operation timed out
+        notebook.retryModalCancel = function () {
+          self.status('failed');
+          huePubSub.publish('hide.retry.modal');
+        }
+        notebook.retryModalConfirm = function () {
+          if (callback) {
+            callback();
+          };
+          huePubSub.publish('hide.retry.modal');
+        }
+        huePubSub.publish('show.retry.modal');
+      }
       else if (data.status == 401) { // Auth required
         self.status('expired');
         $(document).trigger("showAuthModal", {'type': self.type(), 'callback': self.execute});
@@ -483,7 +682,8 @@
         var match = ERROR_REGEX.exec(data.message);
         self.errors.push({
           message: data.message,
-          line: match === null ? null : parseInt(match[1]) - 1
+          line: match === null ? null : parseInt(match[1]) - 1,
+          col: match === null ? null : (typeof match[3] !== 'undefined' ? parseInt(match[3]) : null)
         });
       } else {
         $(document).trigger("error", data.message);
@@ -491,86 +691,169 @@
       }
     };
 
-    self.lastExecuted = 0;
+    self.wasBatchExecuted = ko.observable(typeof snippet.wasBatchExecuted != "undefined" && snippet.wasBatchExecuted != null ? snippet.wasBatchExecuted : false);
+    self.isReady = ko.computed(function() {
+      return ((self.type() != 'jar' && self.type() != 'java') && self.statement() !== '') ||
+        ((self.type() == 'jar' || self.type() == 'java') && (self.properties().app_jar() != '' && self.properties().class() != ''));
+    });
+    self.lastExecuted = ko.observable(typeof snippet.lastExecuted != "undefined" && snippet.lastExecuted != null ? snippet.lastExecuted : 0);
+
+    self.executingBlockingOperation = null; // A ExecuteStatement()
+    self.showLongOperationWarning = ko.observable(false);
+
+    var longOperationTimeout = -1;
+
+    function startLongOperationTimeout() {
+      longOperationTimeout = window.setTimeout(function () {
+        self.showLongOperationWarning(true);
+      }, 2000);
+    }
+
+    function stopLongOperationTimeout() {
+      window.clearTimeout(longOperationTimeout);
+      self.showLongOperationWarning(false);
+    }
 
     self.execute = function () {
       var now = (new Date()).getTime(); // We don't allow fast clicks
-      if (self.status() == 'running' || self.status() == 'loading' || now - self.lastExecuted < 1000 || self.statement() == '') {
+      if (self.status() == 'running' || self.status() == 'loading' || now - self.lastExecuted() < 1000 || ! self.isReady()) {
         return;
       }
 
-      notebook.showHistory(false);
-
       self.previousChartOptions = {
-        chartScope: typeof self.chartScope() !== "undefined" ? self.chartX() : self.previousChartOptions.chartX,
+        chartScope: typeof self.chartScope() !== "undefined" ? self.chartScope() : self.previousChartOptions.chartScope,
         chartX: typeof self.chartX() !== "undefined" ? self.chartX() : self.previousChartOptions.chartX,
         chartYSingle: typeof self.chartYSingle() !== "undefined" ? self.chartYSingle() : self.previousChartOptions.chartYSingle,
         chartMapLabel: typeof self.chartMapLabel() !== "undefined" ? self.chartMapLabel() : self.previousChartOptions.chartMapLabel,
-        chartYMulti: typeof self.chartYMulti() !== "undefined" ? self.chartYMulti() : self.previousChartOptions.chartYMulti
+        chartYMulti: typeof self.chartYMulti() !== "undefined" ? self.chartYMulti() : self.previousChartOptions.chartYMulti,
+        chartSorting: typeof self.chartSorting() !== "undefined" ? self.chartSorting() : self.previousChartOptions.chartSorting,
+        chartScatterGroup: typeof self.chartScatterGroup() !== "undefined" ? self.chartScatterGroup() : self.previousChartOptions.chartScatterGroup,
+        chartScatterSize: typeof self.chartScatterSize() !== "undefined" ? self.chartScatterSize() : self.previousChartOptions.chartScatterSize
       };
       $(document).trigger("executeStarted", self);
-      self.lastExecuted = now;
+      self.lastExecuted(now);
       $(".jHueNotify").hide();
       logGA('execute/' + self.type());
 
+      if (self.result.fetchedOnce()) {
+        self.close();
+        self.statusForButtons('executed');
+      }
+
       self.status('running');
+      self.statusForButtons('executing');
       self.errors([]);
-      self.result.logLines = 0;
+      self.result.clear();
       self.progress(0);
       self.jobs([]);
       self.result.logs('');
+      self.result.statement_range ({
+        start: {
+          row: 0,
+          column: 0
+        },
+        end: {
+          row: 0,
+          column: 0
+        }
+      });
 
-      if (self.result.fetchedOnce()) {
-        self.close();
-      }
+      // TODO: rename startLongOperationTimeout to startBlockingOperationTimeout
+      // TODO: stop blocking operation UI if there is one
+      // TODO: offer to stop blocking submit or fetch operation UI if there is one (add a new call to function for cancelBlockingOperation)
+      // TODO: stop current blocking operation if there is one
+      // TODO: handle jquery.dataTables.1.8.2.min.js:150 Uncaught TypeError: Cannot read property 'asSorting' of undefined on some cancels
+      // TODO: we should cancel blocking operation when leaving notebook (similar to unload())
+      // TODO: we should test when we go back to a query history of a blocking operation that we left
+      startLongOperationTimeout();
 
-      $.post("/notebook/api/execute", {
-        notebook: ko.mapping.toJSON(notebook.getContext()),
+      self.currentQueryTab('queryHistory');
+
+      self.executingBlockingOperation = $.post("/notebook/api/execute", {
+        notebook: vm.editorMode() ? ko.mapping.toJSON(notebook, NOTEBOOK_MAPPING) : ko.mapping.toJSON(notebook.getContext()),
         snippet: ko.mapping.toJSON(self.getContext())
       }, function (data) {
+        self.statusForButtons('executed');
+        stopLongOperationTimeout();
+
+        if (vm.editorMode() && data.history_id) {
+          var url = '/notebook/editor?editor=' + data.history_id;
+          hueUtils.changeURL(url);
+          notebook.id(data.history_id);
+          notebook.uuid(data.history_uuid);
+          notebook.isHistory(true);
+          notebook.parentSavedQueryUuid(data.history_parent_uuid);
+        }
+
         if (data.status == 0) {
-          self.result.clear();
           self.result.handle(data.handle);
           self.result.hasResultset(data.handle.has_result_set);
-          if (data.handle.statements_count != null) {
-            self.result.statements_count(data.handle.statements_count);
-          }
-          if (data.handle.statement_id != null) {
-            self.result.statement_id(data.handle.statement_id);
-          }
           if (data.handle.sync) {
-            self.loadData(data.handle, 100);
+            self.loadData(data.result, 100);
             self.status('success');
             self.progress(100);
           } else {
-            self.checkStatus();
+            if (! notebook.unloaded()) { self.checkStatus(); };
           }
         } else {
           self._ajaxError(data, self.execute);
         }
-      }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
-        self.status('failed');
-      })
-      .always(function() {
-        if (notebook.type() != 'notebook') {
-          $.post("/notebook/api/historify", {
-            notebook: ko.mapping.toJSON(notebook, SPARK_MAPPING)
-          }, function(data){
-            if (vm.editorMode && data && data.status == 0 && data.id){
-              hueUtils.changeURL('/notebook/editor?editor=' + data.id);
+
+        if (data.handle) {
+          if (vm.editorMode()) {
+            notebook.history.unshift(
+              notebook._makeHistoryRecord(
+                url,
+                data.handle.statement,
+                self.lastExecuted(),
+                self.status(),
+                notebook.name(),
+                notebook.uuid()
+              )
+            );
+          }
+
+          if (data.handle.statements_count != null) {
+            self.result.statements_count(data.handle.statements_count);
+            self.result.statement_id(data.handle.statement_id);
+
+            if (data.handle.statements_count > 1 && data.handle.start != null && data.handle.end != null) {
+              self.result.statement_range({
+                start: data.handle.start,
+                end: data.handle.end
+              });
             }
-          });
+          }
         }
+      }).fail(function (xhr, textStatus, errorThrown) {
+        if (self.statusForButtons() != 'canceled') { // No error when manually canceled
+          $(document).trigger("error", xhr.responseText);
+        }
+        self.status('failed');
+        self.statusForButtons('executed');
+      }).always(function () {
+        self.executingBlockingOperation = null;
       });
     };
 
     self.reexecute = function () {
       self.result.handle()['statement_id'] = 0;
+      self.result.handle()['start'] = {
+        row: 0,
+        column: 0
+      };
+      self.result.handle()['end'] = {
+        row: 0,
+        column: 0
+      };
       self.result.handle()['has_more_statements'] = false;
 
       self.execute();
     };
+
+    self.formatEnabled = ko.pureComputed(function () {
+      return self.statement_raw && self.statement_raw() != null && self.statement_raw().length < 400000; // ie: 5000 lines at 80 chars per line
+    });
 
     self.format = function () {
       if (self.isSqlDialect() && vkbeautify) {
@@ -585,6 +868,59 @@
       logGA('format');
     };
 
+    self.clear = function () {
+      logGA('clear');
+      self.ace().setValue('', 1);
+      self.result.clear();
+      self.status('ready');
+    };
+
+    self.explain = function () {
+      logGA('explain');
+
+      if (self.statement() == '' || self.status() == 'running' || self.status() === 'loading') {
+        return;
+      }
+
+      self.result.explanation('');
+      self.errors([]);
+      self.progress(0);
+      self.status('ready');
+
+      $.post("/notebook/api/explain", {
+        notebook: ko.mapping.toJSON(notebook.getContext()),
+        snippet: ko.mapping.toJSON(self.getContext())
+      }, function(data) {
+        if (data.status == 0) {
+          self.currentQueryTab('queryExplain');
+          self.result.fetchedOnce(true);
+          self.result.explanation(data.explanation);
+        } else {
+          self._ajaxError(data);
+        }
+      });
+    }
+
+    self.queryCompatibility = function () {
+      logGA('compatibility');
+      self.suggestion(false);
+
+      $.post("/metadata/api/optimizer_api/query_compatibility", {
+        query: self.statement(),
+        sourcePlatform: self.type(),
+        targetPlatform: 'impala'
+      }, function(data) {
+        if (data.status == 0) {
+         self.suggestion(ko.mapping.fromJS(data.query_compatibility.platformCompilationStatus.Impala));
+         self.hasSuggestion(true);
+        } else {
+          $(document).trigger("error", data.message);
+        }
+      }).fail(function (xhr, textStatus, errorThrown) {
+        $(document).trigger("error", xhr.responseText);
+      });
+    };
+
     self.fetchResult = function (rows, startOver) {
       if (typeof startOver == "undefined") {
         startOver = true;
@@ -593,54 +929,77 @@
       //self.fetchResultMetadata(rows);
     };
 
+    self.isFetchingData = false;
     self.fetchResultData = function (rows, startOver) {
-      logGA('fetchResult/' + rows + '/' + startOver);
-      $.post("/notebook/api/fetch_result_data", {
-        notebook: ko.mapping.toJSON(notebook.getContext()),
-        snippet: ko.mapping.toJSON(self.getContext()),
-        rows: rows,
-        startOver: startOver
-      }, function (data) {
-        if (data.status == 0) {
-          self.loadData(data, rows);
-        } else {
-          self._ajaxError(data);
-          $(document).trigger("renderDataError", {snippet: self});
-        }
-      }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
-      });
+      if (! self.isFetchingData) {
+        startLongOperationTimeout();
+        self.isFetchingData = true;
+        logGA('fetchResult/' + rows + '/' + startOver);
+        $.post("/notebook/api/fetch_result_data", {
+          notebook: ko.mapping.toJSON(notebook.getContext()),
+          snippet: ko.mapping.toJSON(self.getContext()),
+          rows: rows,
+          startOver: startOver
+        }, function (data) {
+          stopLongOperationTimeout();
+          data = JSON.bigdataParse(data);
+          if (data.status == 0) {
+            self.loadData(data.result, rows);
+          } else {
+            self._ajaxError(data, function() {self.isFetchingData = false; self.fetchResultData(rows, startOver); });
+            $(document).trigger("renderDataError", {snippet: self});
+          }
+        }, 'text').fail(function (xhr, textStatus, errorThrown) {
+          $(document).trigger("error", xhr.responseText);
+        }).always(function () {
+          self.isFetchingData = false;
+        });
+      }
     };
 
-    self.loadData = function (data, rows) {
-      rows -= data.result.data.length;
+    self.loadData = function (result, rows) {
+      rows -= result.data.length;
+
+      if (result.data.length > 0) {
+        self.currentQueryTab('queryResults');
+      }
 
       var _initialIndex = self.result.data().length;
       var _tempData = [];
-      $.each(data.result.data, function (index, row) {
+      $.each(result.data, function (index, row) {
         row.unshift(_initialIndex + index + 1);
         self.result.data.push(row);
         _tempData.push(row);
       });
 
-      self.result.images(typeof data.result.images != "undefined" && data.result.images != null ? data.result.images : []);
+      self.result.images(typeof result.images != "undefined" && result.images != null ? result.images : []);
 
       $(document).trigger("renderData", {data: _tempData, snippet: self, initial: _initialIndex == 0});
 
       if (! self.result.fetchedOnce()) {
-        data.result.meta.unshift({type: "INT_TYPE", name: "", comment: null});
-        self.result.meta(data.result.meta);
-        self.result.type(data.result.type);
+        result.meta.unshift({type: "INT_TYPE", name: "", comment: null});
+        self.result.meta(result.meta);
+        self.result.type(result.type);
         self.result.fetchedOnce(true);
       }
 
-      self.result.hasMore(data.result.has_more);
+      self.result.meta().forEach(function (meta) {
+        if ($.inArray(meta.type, ['TINYINT_TYPE', 'SMALLINT_TYPE', 'INT_TYPE', 'BIGINT_TYPE', 'FLOAT_TYPE', 'DOUBLE_TYPE', 'DECIMAL_TYPE', 'TIMESTAMP_TYPE', 'DATE_TYPE']) > -1) {
+          meta.cssClass = 'sort-numeric';
+        } else if ($.inArray(meta.type, ['TIMESTAMP_TYPE', 'DATE_TYPE']) > -1) {
+          meta.cssClass = 'sort-date';
+        } else {
+          meta.cssClass = 'sort-string';
+        }
+      })
 
-      if (data.result.has_more && rows > 0) {
+      self.result.hasMore(result.has_more);
+
+      if (result.has_more && rows > 0) {
         setTimeout(function () {
           self.fetchResultData(rows, false);
         }, 500);
-      } else if (! self.isSqlDialect() && notebook.snippets()[notebook.snippets().length - 1] == self) {
+      } else if (! vm.editorMode() && notebook.snippets()[notebook.snippets().length - 1] == self) {
         notebook.newSnippet();
       }
     };
@@ -666,36 +1025,46 @@
         notebook: ko.mapping.toJSON(notebook.getContext()),
         snippet: ko.mapping.toJSON(self.getContext())
       }, function (data) {
-        if (data.status == 0) {
-          self.status(data.query_status.status);
-          self.getLogs();
-
-          if (self.status() == 'running' || self.status() == 'starting') {
-            self.result.endTime(new Date());
-            self.checkStatusTimeout = setTimeout(self.checkStatus, 1000);
+        if (self.statusForButtons() == 'canceling' || self.status() == 'canceled') {
+          // Query was canceled in the meantime, do nothing
+        } else {
+          if (vm.editorMode()) {
+            self.getLogs();
           }
-          else if (self.status() == 'available') {
-            self.fetchResult(100);
-            self.progress(100);
-            if (self.isSqlDialect() && ! self.result.handle().has_result_set) { // DDL
-              huePubSub.publish('assist.db.refresh', self.type());
-              if (self.result.handle().has_more_statements) {
-                setTimeout(function () {
-                  self.execute(); // Execute next, need to wait as we disabled fast click
-                }, 1000);
+
+          if (data.status == 0) {
+            self.status(data.query_status.status);
+
+            if (self.status() == 'running' || self.status() == 'starting') {
+              self.result.endTime(new Date());
+              if (! notebook.unloaded()) { self.checkStatusTimeout = setTimeout(self.checkStatus, 1000); };
+            }
+            else if (self.status() == 'available') {
+              self.fetchResult(100);
+              self.progress(100);
+             if (self.isSqlDialect() && ! self.result.handle().has_result_set) { // DDL
+                self.ddlNotification(Math.random());
+                if (self.result.handle().has_more_statements) {
+                  setTimeout(function () {
+                    self.execute(); // Execute next, need to wait as we disabled fast click
+                  }, 1000);
+                }
+              }
+              if (vm.successUrl()) {
+                window.location.href = vm.successUrl();
               }
             }
+            else if (self.status() == 'success') {
+              self.progress(99);
+            }
+          } else if (data.status == -3) {
+            self.status('expired');
+          } else {
+            self._ajaxError(data);
           }
-          else if (self.status() == 'success') {
-            self.progress(99);
-          }
-        } else if (data.status == -3) {
-          self.status('expired');
-        } else {
-          self._ajaxError(data);
         }
       }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
+        $(document).trigger("error", xhr.responseText || textStatus);
         self.status('failed');
       });
     };
@@ -707,19 +1076,31 @@
       }
       logGA('cancel');
 
-      $.post("/notebook/api/cancel_statement", {
-        notebook: ko.mapping.toJSON(notebook.getContext()),
-        snippet: ko.mapping.toJSON(self.getContext())
-      }, function (data) {
-        if (data.status == 0) {
-          self.status('canceled');
-        } else {
-          self._ajaxError(data);
+      if ($.isEmptyObject(self.result.handle())) { // Query was not even submitted yet
+        if (self.executingBlockingOperation != null) {
+          self.executingBlockingOperation.abort();
+          self.executingBlockingOperation = null;
         }
-      }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
+        self.statusForButtons('canceled');
         self.status('failed');
-      });
+      } else {
+        self.statusForButtons('canceling');
+        $.post("/notebook/api/cancel_statement", {
+          notebook: ko.mapping.toJSON(notebook.getContext()),
+          snippet: ko.mapping.toJSON(self.getContext())
+        }, function (data) {
+          self.statusForButtons('canceled');
+          if (data.status == 0) {
+            self.status('canceled');
+          } else {
+            self._ajaxError(data);
+          }
+        }).fail(function (xhr, textStatus, errorThrown) {
+          $(document).trigger("error", xhr.responseText);
+          self.statusForButtons('canceled');
+          self.status('failed');
+        });
+      }
     };
 
     self.close = function () {
@@ -748,7 +1129,7 @@
         notebook: ko.mapping.toJSON(notebook.getContext()),
         snippet: ko.mapping.toJSON(self.getContext()),
         from: self.result.logLines,
-        jobs: ko.mapping.toJSON(self.jobs),
+        jobs: ko.mapping.toJSON(self.jobs, { ignore: ['percentJob'] }),
         full_log: self.result.logs
       }, function (data) {
         if (data.status == 1) { // Append errors to the logs
@@ -760,32 +1141,79 @@
             var logs = data.logs.split("\n");
             self.result.logLines += logs.length;
             var oldLogs = self.result.logs();
-            if (oldLogs === "") {
+            if (data.logs && (
+                oldLogs === "" || (self.wasBatchExecuted() && data.logs.indexOf('Unable to locate') == -1) || data.isFullLogs)) {
               self.result.logs(data.logs);
             } else {
               self.result.logs(oldLogs + "\n" + data.logs);
             }
           }
+
+          self.jobs().forEach(function(job){
+            if (typeof job.percentJob === 'undefined'){
+              job.percentJob = ko.observable(-1);
+            }
+          });
+
           if (data.jobs.length > 0) {
-            self.jobs(data.jobs);
+            data.jobs.forEach(function (job) {
+              var _found = ko.utils.arrayFilter(self.jobs(), function (item) {
+                return item.name === job.name;
+              });
+              if (_found.length === 0) {
+                if (typeof job.percentJob === 'undefined') {
+                  job.percentJob = ko.observable(-1);
+                }
+                self.jobs.push(job);
+              }
+            });
+            self.jobs().forEach(function (job) {
+              var _found = ko.utils.arrayFilter(self.jobs(), function (item) {
+                return item.name === job.name;
+              });
+              if (_found.length === 0) {
+                self.jobs.remove(job);
+              }
+            });
           }
-          self.progress(data.progress);
+          if (self.status() == 'running') { // Maybe the query finished or failed in the meantime
+            self.progress(data.progress)
+          };
         } else {
           self._ajaxError(data);
         }
       }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
+        $(document).trigger("error", xhr.responseText || textStatus);
         self.status('failed');
+      });
+    };
+
+    self.getComplexity = function () {
+      logGA('get_complexity');
+      self.complexity('');
+
+      $.post("/metadata/api/optimizer_api/query_complexity", {
+        snippet: ko.mapping.toJSON(self.getContext())
+      }, function(data) {
+        if (data.status == 0) {
+          self.complexity(data.query_complexity.comment);
+          self.complexityLevel(data.query_complexity.level);
+        } else {
+          $(document).trigger("error", data.message);
+        }
       });
     };
 
     self.autocompleter = new Autocompleter({
       snippet: self,
-      user: vm.user
+      user: vm.user,
+      optEnabled: false,
+      timeout: vm.autocompleteTimeout,
+      useNewAutocompleter: vm.useNewAutocompleter
     });
 
     self.init = function () {
-      if (self.status() == 'running') {
+      if (self.status() == 'running' || self.status() == 'available') {
         self.checkStatus();
       }
       else if (self.status() == 'loading') {
@@ -814,7 +1242,7 @@
     self.availableNewProperties = ko.computed(function() {
       var addedIndex = {};
       $.each(self.properties(), function(index, property) {
-        addedIndex[property.key()] = true;
+        addedIndex[property.key] = true;
       });
       var result = $.grep(vm.availableSessionProperties(), function(property) {
         return ! addedIndex[property.name];
@@ -831,6 +1259,11 @@
     self.name = ko.observable(typeof notebook.name != "undefined" && notebook.name != null ? notebook.name : 'My Notebook');
     self.description = ko.observable(typeof notebook.description != "undefined" && notebook.description != null ? notebook.description: '');
     self.type = ko.observable(typeof notebook.type != "undefined" && notebook.type != null ? notebook.type : 'notebook');
+    self.coordinatorUuid = ko.observable(typeof notebook.coordinatorUuid != "undefined" && notebook.coordinatorUuid != null ? notebook.coordinatorUuid : null);
+    self.isHistory = ko.observable(typeof notebook.is_history != "undefined" && notebook.is_history != null ? notebook.is_history : false);
+    self.parentSavedQueryUuid = ko.observable(typeof notebook.parentSavedQueryUuid != "undefined" && notebook.parentSavedQueryUuid != null ? notebook.parentSavedQueryUuid : null); // History parent
+    self.isSaved = ko.observable(typeof notebook.isSaved != "undefined" && notebook.isSaved != null ? notebook.isSaved : false);
+    self.canWrite = ko.observable(typeof notebook.can_write != "undefined" && notebook.can_write != null ? notebook.can_write : true);
     self.snippets = ko.observableArray();
     self.selectedSnippet = ko.observable(vm.availableSnippets().length > 0 ? vm.availableSnippets()[0].type() : 'NO_SNIPPETS');
     self.creatingSessionLocks = ko.observableArray();
@@ -839,11 +1272,30 @@
         return new Session(vm, value.data);
       }
     });
+    self.directoryUuid = ko.observable(typeof notebook.directoryUuid != "undefined" && notebook.directoryUuid != null ? notebook.directoryUuid : null);
+    self.dependents = ko.mapping.fromJS(typeof notebook.dependents != "undefined" && notebook.dependents != null ? notebook.dependents : []);
+    self.dependentsCoordinator = ko.computed(function() {
+      return $.grep(self.dependents(), function(doc) { return doc.type() == 'oozie-coordinator2' && doc.is_managed() == true ;})
+    });
+    if (self.dependentsCoordinator().length > 0 && ! self.coordinatorUuid()) {
+      self.coordinatorUuid(self.dependentsCoordinator()[0].uuid());
+    }
+    self.history = ko.observableArray(vm.selectedNotebook() ? vm.selectedNotebook().history() : []);
+    self.historyFilter = ko.observable('');
+    self.historyFilterVisible = ko.observable(false);
+    self.historyFilter.extend({ rateLimit: 300 });
+    self.historyFilter.subscribe(function(val){
+      self.fetchHistory();
+    });
 
-    self.history = ko.observableArray([]);
-    // TODO: Move showHistory, fetchHistory and clearHistory into the Snippet and drop self.selectedSnippet
-    self.showHistory = ko.observable(typeof notebook.showHistory != "undefined" && notebook.showHistory != null ? notebook.showHistory : false);
+    self.schedulerViewModel = null;
+    self.schedulerViewerViewModel = ko.observable();
 
+    self.retryModalConfirm = null;
+    self.retryModalCancel = null;
+
+    self.loadingHistory = ko.observable(self.history().length == 0);
+    // TODO: Move fetchHistory and clearHistory into the Snippet and drop self.selectedSnippet. Actually, history should go in the assist in Hue 4.
     self.getSession = function (session_type) {
       var _s = null;
       $.each(self.sessions(), function (index, s) {
@@ -860,6 +1312,22 @@
         return snippet.type() == type;
       });
     };
+
+    self.unloaded = ko.observable(false);
+    self.unload = function() {
+      self.unloaded(true);
+      var currentQueries = null;
+      self.snippets().forEach(function(snippet){
+        if (snippet.checkStatusTimeout != null) {
+          clearTimeout(snippet.checkStatusTimeout);
+          snippet.checkStatusTimeout = null;
+        }
+        if (currentQueries == null) {
+          currentQueries = snippet.queries();
+        }
+      });
+      return currentQueries;
+    }
 
     self.restartSession = function (session, callback) {
       if (session.restarting()) {
@@ -943,30 +1411,30 @@
       $.post("/notebook/api/create_session", {
         notebook: ko.mapping.toJSON(self.getContext()),
         session: ko.mapping.toJSON(session) // e.g. {'type': 'pyspark', 'properties': [{'name': driverCores', 'value', '2'}]}
-        }, function (data) {
-          if (data.status == 0) {
-            ko.mapping.fromJS(data.session, {}, session);
-            if (self.getSession(session.type()) == null) {
-              self.addSession(session);
-            }
-            $.each(self.getSnippets(session.type()), function(index, snippet) {
-              snippet.status('ready');
-            });
-            if (callback) {
-              setTimeout(callback, 500);
-            }
-          } else if (data.status == 401) {
-            $(document).trigger("showAuthModal", {'type': session.type()});
+      }, function (data) {
+        if (data.status == 0) {
+          ko.mapping.fromJS(data.session, {}, session);
+          if (self.getSession(session.type()) == null) {
+            self.addSession(session);
           }
-          else {
-            fail(data.message);
+          $.each(self.getSnippets(session.type()), function(index, snippet) {
+            snippet.status('ready');
+          });
+          if (callback) {
+            setTimeout(callback, 500);
           }
-        }).fail(function (xhr) {
-          fail(xhr.responseText);
-        }).complete(function(xhr, status) {
-          self.creatingSessionLocks.remove(session.type());
-        })
-      };
+        } else if (data.status == 401) {
+          $(document).trigger("showAuthModal", {'type': session.type()});
+        }
+        else {
+          fail(data.message);
+        }
+      }).fail(function (xhr) {
+        fail(xhr.responseText);
+      }).complete(function(xhr, status) {
+        self.creatingSessionLocks.remove(session.type());
+      })
+    };
 
     self.authSession = function () {
       self.createSession(new Session(vm, {
@@ -1013,19 +1481,56 @@
      return {
          id: self.id,
          uuid: self.uuid,
-         sessions: self.sessions
+         parentSavedQueryUuid: self.parentSavedQueryUuid,
+         isSaved: self.isSaved,
+         sessions: self.sessions,
+         type: self.type
       };
     };
 
     self.save = function () {
+      logGA('save');
+
+      // Remove the result data from the snippets
+      var cp = ko.mapping.toJS(self, NOTEBOOK_MAPPING);
+      $.each(cp.snippets, function(index, snippet) {
+        snippet.result.data.length = 0; // snippet.result.clear() does not work for some reason
+        snippet.result.meta.length = 0;
+        snippet.result.logs = '';
+        snippet.result.fetchedOnce = false;
+        snippet.progress = 0; // Remove progress
+        snippet.jobs.length = 0;
+      });
+      if (cp.schedulerViewModel) {
+        cp.schedulerViewModel.availableTimezones = [];
+      }
+
       $.post("/notebook/api/notebook/save", {
-        "notebook": ko.mapping.toJSON(self, SPARK_MAPPING),
-        "editorMode": vm.editorMode
+        "notebook": ko.mapping.toJSON(cp, NOTEBOOK_MAPPING),
+        "editorMode": vm.editorMode()
       }, function (data) {
         if (data.status == 0) {
           self.id(data.id);
+          self.isSaved(true);
+          self.isHistory(false);
           $(document).trigger("info", data.message);
-          if (vm.editorMode){
+          if (vm.editorMode()) {
+            if (! data.save_as && self.snippets()[0].queries().length != 0) {
+              self.snippets()[0].queries.unshift({
+                'uuid': data.uuid,
+                'name': data.name,
+                'description': data.description,
+                'owner': data.owner,
+                'last_modified': data.last_modified
+              });
+            }
+            if (! self.schedulerViewModel) {
+              self.loadScheduler();
+            } else {
+              self.saveScheduler();
+              self.refreshSchedulerParameters();
+            }
+
             hueUtils.changeURL('/notebook/editor?editor=' + data.id);
           }
           else {
@@ -1041,9 +1546,10 @@
     };
 
     self.close = function () {
+      logGA('close');
       $.post("/notebook/api/notebook/close", {
-        "notebook": ko.mapping.toJSON(self, SPARK_MAPPING),
-        "editorMode": vm.editorMode
+        "notebook": ko.mapping.toJSON(self, NOTEBOOK_MAPPING),
+        "editorMode": vm.editorMode()
       });
     };
 
@@ -1075,6 +1581,15 @@
       }
     };
 
+    self.saveDefaultUserProperties = function (session) {
+      var apiHelper = ApiHelper.getInstance();
+      apiHelper.saveConfiguration({
+        app: session.type(),
+        properties: session.properties,
+        userId: vm.userId
+      });
+    };
+
     self.closeAndRemoveSession = function (session) {
       self.closeSession(session, false, function() {
         self.sessions.remove(session);
@@ -1099,42 +1614,188 @@
       });
     };
 
-    self.fetchHistory = function () {
+    self.fetchHistory = function (callback) {
+      self.loadingHistory(true);
       $.get("/notebook/api/get_history", {
-        doc_type: self.selectedSnippet()
+        doc_type: self.selectedSnippet(),
+        limit: 50,
+        doc_text: self.historyFilter()
       }, function(data) {
         var parsedHistory = [];
         if (data && data.history){
           data.history.forEach(function(nbk){
-            parsedHistory.push({
-              url: nbk.absoluteUrl,
-              query: nbk.data.snippets[0].statement_raw,
-              lastExecuted: nbk.data.snippets[0].lastExecuted,
-              status: nbk.data.snippets[0].status
-            });
+            parsedHistory.push(
+              self._makeHistoryRecord(
+                nbk.absoluteUrl,
+                nbk.data.statement,
+                nbk.data.lastExecuted,
+                nbk.data.status,
+                nbk.name,
+                nbk.uuid
+              )
+            );
           });
         }
         self.history(parsedHistory);
+      }).always(function(){
+        self.loadingHistory(false);
+        if (callback) {
+          callback();
+        }
       });
     };
 
-    self.showHistory.subscribe(function (val) {
-      if (val) {
-        self.fetchHistory();
+    self.updateHistory = function (statuses, interval) {
+      var items = $.grep(self.history(), function (item) {
+        return statuses.indexOf(item.status()) != -1;
+      });
+
+      function updateHistoryCall(item) {
+        $.post("/notebook/api/check_status", {
+          notebook: ko.mapping.toJSON({id: item.uuid()}),
+        }, function (data) {
+          var status = data.status == -3 ? 'expired' : (data.status == 0 ? data.query_status.status : 'failed');
+          if (status && item.status() != status) {
+            item.status(status);
+          }
+        }).always(function () {
+          if (items.length > 0) {
+            window.setTimeout(function () {
+              updateHistoryCall(items.pop());
+            }, 1000);
+          } else {
+            window.setTimeout(function() { self.updateHistory(statuses, interval); }, interval);
+          }
+        });
       }
-    });
+
+     if (items.length > 0) {
+        updateHistoryCall(items.pop());
+      } else {
+        window.setTimeout(function() { self.updateHistory(statuses, interval); }, interval);
+      }
+    };
+
+    self._makeHistoryRecord = function(url, statement, lastExecuted, status, name, uuid) {
+      return ko.mapping.fromJS({
+          url: url,
+          query: statement.substring(0, 1000) + (statement.length > 1000 ? '...' : ''),
+          lastExecuted: lastExecuted,
+          status: status,
+          name: name,
+          uuid: uuid
+      });
+    };
 
     self.clearHistory = function (type) {
+      logGA('clearHistory');
       $.post("/notebook/api/clear_history", {
         notebook: ko.mapping.toJSON(self.getContext()),
         doc_type: self.selectedSnippet()
       }, function (data) {
-          self.history.removeAll();
-          self.showHistory(false);
-        }).fail(function (xhr) {
-           $(document).trigger("error", xhr.responseText);
-        });
+        self.history.removeAll();
+        if (self.isHistory()) {
+          self.id(null);
+          self.uuid(UUID());
+          hueUtils.changeURL('/notebook/editor?type=' + vm.editorType());
+        }
+      }).fail(function (xhr) {
+        $(document).trigger("error", xhr.responseText);
+      });
       $(document).trigger("hideHistoryModal");
+    };
+
+    self.loadScheduler = function () {
+      if (typeof vm.CoordinatorEditorViewModel !== 'undefined') {
+        var _action;
+        if (self.coordinatorUuid()) {
+          _action = 'edit';
+        } else {
+          _action = 'new';
+        }
+        logGA('schedule/' + _action);
+
+        $.get('/oozie/editor/coordinator/' + _action + '/', {
+          format: 'json',
+          document: self.uuid(),
+          coordinator: self.coordinatorUuid()
+        }, function (data) {
+          $("#schedulerEditor").html(data.layout);
+          self.schedulerViewModel = new vm.CoordinatorEditorViewModel(data.coordinator, data.credentials, data.workflows, data.can_edit);
+
+          ko.cleanNode($("#schedulerEditor")[0]);
+          ko.applyBindings(self.schedulerViewModel, $("#schedulerEditor")[0]);
+
+          huePubSub.publish('render.jqcron');
+
+          self.schedulerViewModel.coordinator.properties.cron_advanced.valueHasMutated(); // Update jsCron enabled status
+          self.schedulerViewModel.coordinator.tracker().markCurrentStateAsClean();
+          self.schedulerViewModel.isEditing(true);
+
+          if (_action == 'new') {
+            self.saveScheduler();
+          }
+        }).fail(function (xhr) {
+          $(document).trigger("error", xhr.responseText);
+        });
+      }
+    };
+
+    self.refreshSchedulerParameters = function() {
+      $.post("/oozie/editor/workflow/action/refresh_parameters/", {
+        uuid: self.coordinatorUuid()
+      }, function(data) {
+        if (data.status == 0) {
+          if (data.changed) {
+            self.schedulerViewModel.coordinator.refreshParameters()
+          }
+        } else {
+          $(document).trigger("error", data.message);
+        }
+      });
+    }
+
+    self.saveScheduler = function() {
+      if (! self.coordinatorUuid() || self.schedulerViewModel.coordinator.isDirty()) {
+        self.schedulerViewModel.coordinator.isManaged(true);
+        self.schedulerViewModel.save(function(data) {
+          self.coordinatorUuid(data.uuid);
+        });
+      }
+    };
+
+    self.showSubmitPopup = function () {
+      $.get('/oozie/editor/coordinator/submit/' + self.coordinatorUuid(), {
+        format: 'json'
+      }, function (data) {
+        $(document).trigger("showSubmitPopup", data);
+      }).fail(function (xhr, textStatus, errorThrown) {
+        $(document).trigger("error", xhr.responseText);
+      });
+    };
+
+
+    self.viewSchedulerId = ko.observable(typeof notebook.viewSchedulerId != "undefined" && notebook.viewSchedulerId != null ? notebook.viewSchedulerId : '');
+    self.viewSchedulerId.subscribe(function(newVal) {
+      self.save();
+    });
+    self.loadingScheduler = ko.observable(false);
+    self.viewSchedulerInfo = ko.observable();
+    self.viewScheduler = function() {
+      if (typeof vm.RunningCoordinatorModel !== 'undefined') {
+        logGA('schedule/view');
+        self.loadingScheduler(true);
+        $.get("/oozie/list_oozie_coordinator/" + self.viewSchedulerId(), {
+          format: 'json'
+        }, function (data) {
+          self.schedulerViewerViewModel(new vm.RunningCoordinatorModel(data.actions));
+          self.viewSchedulerInfo(ko.mapping.fromJS(data));
+        }).fail(function (xhr) {
+          $(document).trigger("error", xhr.responseText);
+        }).always(function () {
+          self.loadingScheduler(false);
+        });
+      }
     };
 
     self.exportJupyterNotebook = function () {
@@ -1175,7 +1836,7 @@
     }
 
     huePubSub.subscribe("assist.db.panel.ready", function () {
-      if (self.type() == 'query' && self.snippets().length == 1) {
+      if (self.type().indexOf('query') === 0 && self.snippets().length == 1) {
         huePubSub.publish('assist.set.database', {
           source: self.snippets()[0].type(),
           name: self.snippets()[0].database()
@@ -1188,40 +1849,65 @@
       $.each(notebook.snippets, function (index, snippet) {
         self.addSnippet(snippet);
       });
-      if (vm.editorMode) {
-        if (notebook.snippets.length == 0) {
-          self.showHistory(true); // Show history when new query
-        } else if (self.showHistory()) {
-          self.fetchHistory(); // Show on saved query with history selected
-        }
+      if (vm.editorMode() && self.history().length == 0) {
+        self.fetchHistory(function() {
+          self.updateHistory(['starting', 'running'], 20000);
+          self.updateHistory(['available'], 60000 * 5);
+        });
       }
     }
   };
 
 
-  function EditorViewModel(notebooks, options, i18n) {
+  function EditorViewModel(editor_id, notebooks, options, i18n, CoordinatorEditorViewModel, RunningCoordinatorModel) {
     var self = this;
     self.i18n = i18n;
     self.user = options.user;
-    self.notebooks = ko.observableArray();
+    self.userId = options.userId;
+    self.editorType = ko.observable(options.editor_type);
+    self.editorType.subscribe(function(newVal) {
+      console.log('Should happen on new query, or Hive --> Impala only: reload session, saved queries, history if in editor mode');
+    });
+    self.editorTypeTitle = ko.observable(options.editor_type);
+    self.useNewAutocompleter = options.useNewAutocompleter || false;
+    self.autocompleteTimeout = options.autocompleteTimeout;
     self.selectedNotebook = ko.observable();
     self.combinedContent = ko.observable();
     self.isPlayerMode = ko.observable(false);
+    self.isFullscreenMode = ko.observable(false);
+    self.successUrl = ko.observable(options.success_url);
+    self.isOptimizerEnabled = ko.observable(options.is_optimizer_enabled);
+    self.isNavigatorEnabled = ko.observable(options.is_navigator_enabled);
+
+    self.CoordinatorEditorViewModel = CoordinatorEditorViewModel;
+    self.RunningCoordinatorModel = RunningCoordinatorModel;
+
+    self.canSave = ko.computed(function() {
+      // Saved query or history but history coming from a saved query
+      return self.selectedNotebook() && self.selectedNotebook().canWrite() && (
+          self.selectedNotebook().isSaved() ||
+          (self.selectedNotebook().isHistory() && self.selectedNotebook().parentSavedQueryUuid())
+      );
+    });
 
     self.sqlSourceTypes = [];
 
-    $.each(options.languages, function (idx, language) {
-      var viewSettings = options.snippetViewSettings[language.type];
-      if (viewSettings && viewSettings.sqlDialect) {
-        self.sqlSourceTypes.push({
-          type: language.type,
-          name: language.name
-        })
-      }
-    });
+    if (options.languages && options.snippetViewSettings) {
+      $.each(options.languages, function (idx, language) {
+        var viewSettings = options.snippetViewSettings[language.type];
+        if (viewSettings && viewSettings.sqlDialect) {
+          self.sqlSourceTypes.push({
+            type: language.type,
+            name: language.name
+          })
+        }
+      });
+    }
 
-    if (self.sqlSourceTypes.length === 1) {
+    if (self.sqlSourceTypes.length > 0) {
       self.activeSqlSourceType = self.sqlSourceTypes[0].type;
+    } else {
+      self.activeSqlSourceType = null;
     }
 
     self.displayCombinedContent = function () {
@@ -1279,11 +1965,16 @@
     self.assistAvailable = ko.observable(options.assistAvailable);
 
     self.isLeftPanelVisible = ko.observable();
-    AssistHelper.getInstance(self).withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
+    ApiHelper.getInstance(self).withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
+
+    self.isContextPanelVisible = ko.observable(false);
 
     self.availableSnippets = ko.mapping.fromJS(options.languages);
 
-    self.editorMode = options.mode == 'editor';
+    self.editorMode = ko.observable(options.mode == 'editor');
+    self.editorMode.subscribe(function(newVal) {
+      console.log('should be switchable when max 1 snippet');
+    });
 
     self.getSnippetViewSettings = function (snippetType) {
       if (options.snippetViewSettings[snippetType]) {
@@ -1319,33 +2010,118 @@
     };
 
     self.init = function () {
-      $.each(notebooks, function (index, notebook) {
-        self.loadNotebook(notebook);
-        if (self.selectedNotebook() == null) {
-          self.selectedNotebook(self.notebooks()[0]);
-        }
-      });
-      if (self.selectedNotebook().snippets().length === 0 && self.editorMode) { // Add snippet in new Editor
-        self.selectedNotebook().newSnippet();
+      if (editor_id) {
+        self.openNotebook(editor_id);
+      }
+      else if (notebooks.length > 0) {
+        self.loadNotebook(notebooks[0]); // Old way of loading json for /browse
+      } else {
+        self.newNotebook();
       }
     };
 
-    self.loadNotebook = function (notebook) {
-      var notebook = new Notebook(self, notebook);
-      self.notebooks.push(notebook);
-      if (notebook.snippets().length > 0) {
-        notebook.selectedSnippet(notebook.snippets()[notebook.snippets().length - 1].type());
-        notebook.snippets().forEach(function(snippet){
-          snippet.statement_raw.valueHasMutated();
-        });
+    self.loadNotebook = function (notebook, queryTab) {
+      var currentQueries;
+      if (self.selectedNotebook() != null) {
+        currentQueries = self.selectedNotebook().unload();
       }
+
+      var notebook = new Notebook(self, notebook);
+
+      if (notebook.snippets().length > 0) {
+        huePubSub.publish('detach.scrolls', notebook.snippets()[0]);
+        notebook.selectedSnippet(notebook.snippets()[notebook.snippets().length - 1].type());
+        if (currentQueries != null) {
+          notebook.snippets()[0].queries(currentQueries);
+        }
+        notebook.snippets().forEach(function (snippet) {
+          snippet.statement_raw.valueHasMutated();
+          if (snippet.result.handle().statements_count > 1 && snippet.result.handle().start != null && snippet.result.handle().end != null) {
+            snippet.result.statement_range({
+              start: snippet.result.handle().start,
+              end: snippet.result.handle().end
+            });
+            snippet.result.statement_range.valueHasMutated();
+          }
+
+          snippet.previousChartOptions = {
+            chartX: typeof snippet.chartX() !== "undefined" ? snippet.chartX() : snippet.previousChartOptions.chartX,
+            chartYSingle: typeof snippet.chartYSingle() !== "undefined" ? snippet.chartYSingle() : snippet.previousChartOptions.chartYSingle,
+            chartMapLabel: typeof snippet.chartMapLabel() !== "undefined" ? snippet.chartMapLabel() : snippet.previousChartOptions.chartMapLabel,
+            chartYMulti: typeof snippet.chartYMulti() !== "undefined" ? snippet.chartYMulti() : snippet.previousChartOptions.chartYMulti,
+            chartScope: typeof snippet.chartScope() !== "undefined" ? snippet.chartScope() : snippet.previousChartOptions.chartScope,
+            chartSorting: typeof snippet.chartSorting() !== "undefined" ? snippet.chartSorting() : snippet.previousChartOptions.chartSorting,
+            chartScatterGroup: typeof snippet.chartScatterGroup() !== "undefined" ? snippet.chartScatterGroup() : snippet.previousChartOptions.chartScatterGroup,
+            chartScatterSize: typeof snippet.chartScatterSize() !== "undefined" ? snippet.chartScatterSize() : snippet.previousChartOptions.chartScatterSize
+          };
+        });
+
+        if (notebook.snippets()[0].result.data().length > 0) {
+          $(document).trigger("redrawResults");
+        } else if (queryTab) {
+          notebook.snippets()[0].currentQueryTab(queryTab);
+        }
+
+        if (notebook.isSaved()) {
+          notebook.loadScheduler();
+          notebook.snippets()[0].currentQueryTab('savedQueries');
+          if (notebook.snippets()[0].queries().length === 0) {
+            notebook.snippets()[0].fetchQueries(); // Subscribe not updating yet
+          }
+        }
+      }
+
+      self.selectedNotebook(notebook);
+      huePubSub.publish('check.job.browser');
+    };
+
+    self.openNotebook = function (uuid, queryTab, skipUrlChange, callback) {
+      $.get('/desktop/api2/doc/', {
+        uuid: uuid,
+        data: true,
+        dependencies: true
+      }, function (data) {
+        if (data.status == 0) {
+          data.data.dependents = data.dependents;
+          data.data.can_write = data.user_perms.can_write;
+          var notebook = data.data;
+          self.loadNotebook(notebook, queryTab);
+          if (typeof skipUrlChange === 'undefined'){
+            hueUtils.changeURL('/notebook/editor?editor=' + data.document.id);
+          }
+          if (typeof callback !== 'undefined'){
+            callback();
+          }
+        }
+        else {
+          $(document).trigger("error", data.message);
+          self.newNotebook();
+        }
+      });
     };
 
     self.newNotebook = function () {
-      var notebook = new Notebook(self, {});
-      self.notebooks.push(notebook);
-      self.selectedNotebook(notebook);
-      return notebook;
+      $.post("/notebook/api/create_notebook", {
+        type: options.editor_type,
+        directory_uuid: window.location.getParameter('directory_uuid')
+      }, function (data) {
+        self.loadNotebook(data.notebook);
+        if (self.editorMode()) {
+          self.selectedNotebook().newSnippet();
+          huePubSub.publish('detach.scrolls', self.selectedNotebook().snippets()[0]);
+          if (window.location.getParameter('new') == '') {
+            self.selectedNotebook().snippets()[0].statement_raw($.totalStorage('hue.notebook.lastWrittenSnippet.' + self.user + '.' + window.location.getParameter('type')));
+            $.totalStorage('hue.notebook.lastWrittenSnippet.' + self.user +  '.' + window.location.getParameter('type'), '');
+          }
+          if (window.location.getParameter('type')) {
+            hueUtils.changeURL('/notebook/editor?type=' + window.location.getParameter('type'));
+          } else {
+            hueUtils.changeURL('/notebook/editor?type=' + self.editorType());
+          }
+        } else {
+          hueUtils.changeURL('/notebook/notebook');
+        }
+      });
     };
 
     self.saveNotebook = function () {
@@ -1355,10 +2131,10 @@
     self.saveAsNotebook = function () {
       self.selectedNotebook().id(null);
       self.selectedNotebook().uuid(UUID());
+      self.selectedNotebook().parentSavedQueryUuid(null);
       self.saveNotebook();
     };
   }
-
 
   function logGA(page) {
     if (typeof trackOnGA == 'function') {

@@ -21,7 +21,7 @@ import logging
 from django.utils.translation import ugettext as _
 
 from desktop.lib.exceptions_renderable import PopupException
-from desktop.lib.i18n import force_unicode
+from desktop.lib.i18n import smart_unicode
 
 from notebook.conf import get_interpreters
 
@@ -38,12 +38,18 @@ class QueryExpired(Exception):
 class AuthenticationRequired(Exception):
   pass
 
-class QueryError(Exception):
-  def __init__(self, message):
-    self.message = message
+class OperationTimeout(Exception):
+  pass
 
-  def __str__(self):
-    return force_unicode(str(self.message))
+
+class QueryError(Exception):
+  def __init__(self, message, handle=None):
+    self.message = message or _('No error message, please check the logs.')
+    self.handle = handle
+    self.extra = {}
+
+  def __unicode__(self):
+    return smart_unicode(self.message)
 
 
 class Notebook(object):
@@ -58,6 +64,7 @@ class Notebook(object):
       self.data = json.dumps({
           'name': 'My Notebook',
           'description': '',
+          'type': 'notebook',
           'snippets': [],
       })
 
@@ -71,21 +78,27 @@ class Notebook(object):
 
     if self.document is not None:
       _data['id'] = self.document.id
+      _data['is_history'] = self.document.is_history
 
     return _data
 
   def get_str(self):
-    return '\n\n'.join([snippet['statement_raw'] for snippet in self.get_data()['snippets']])
+    return '\n\n\n'.join(['USE %s;\n\n%s' % (snippet['database'], snippet['statement_raw']) for snippet in self.get_data()['snippets']])
 
 
 def get_api(request, snippet):
   from notebook.connectors.hiveserver2 import HS2Api
   from notebook.connectors.jdbc import JdbcApi
   from notebook.connectors.rdbms import RdbmsApi
+  from notebook.connectors.oozie_batch import OozieApi
   from notebook.connectors.pig_batch import PigApi
+  from notebook.connectors.solr import SolrApi
   from notebook.connectors.spark_shell import SparkApi
   from notebook.connectors.spark_batch import SparkBatchApi
   from notebook.connectors.text import TextApi
+
+  if snippet.get('wasBatchExecuted'):
+    return OozieApi(user=request.user, request=request)
 
   interpreter = [interpreter for interpreter in get_interpreters(request.user) if interpreter['type'] == snippet['type']]
   if not interpreter:
@@ -94,7 +107,9 @@ def get_api(request, snippet):
   interface = interpreter['interface']
 
   if interface == 'hiveserver2':
-    return HS2Api(user=request.user)
+    return HS2Api(user=request.user, request=request)
+  elif interface == 'oozie':
+    return OozieApi(user=request.user, request=request)
   elif interface == 'livy':
     return SparkApi(request.user)
   elif interface == 'livy-batch':
@@ -105,6 +120,8 @@ def get_api(request, snippet):
     return RdbmsApi(request.user, interpreter=snippet['type'])
   elif interface == 'jdbc':
     return JdbcApi(request.user, interpreter=interpreter)
+  elif interface == 'solr':
+    return SolrApi(request.user, interpreter=interpreter)
   elif interface == 'pig':
     return PigApi(user=request.user, request=request)
   else:
@@ -155,3 +172,9 @@ class Api(object):
 
   def get_jobs(self, notebook, snippet, logs):
     return []
+
+  def export_data_as_hdfs_file(self, snippet, target_file, overwrite): raise NotImplementedError()
+
+  def export_data_as_table(self, notebook, snippet, destination): raise NotImplementedError()
+
+  def export_large_data_to_hdfs(self, notebook, snippet, destination): raise NotImplementedError()

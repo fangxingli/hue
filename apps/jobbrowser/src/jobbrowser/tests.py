@@ -18,6 +18,7 @@
 
 import json
 import logging
+import re
 import time
 import unittest
 
@@ -223,12 +224,12 @@ class TestJobBrowserWithHadoop(unittest.TestCase, OozieServerProvider):
 
     # Select only killed jobs (should be absent)
     # Taking advantage of the fact new jobs are at the top of the list!
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&state=killed')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'state': 'killed'})
     assert_false(hadoop_job_id_short in response.content)
 
     # Select only failed jobs (should be present)
     # Map job should succeed. Reduce job should fail.
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&state=failed')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'state': 'failed'})
     assert_true(hadoop_job_id_short in response.content)
 
     raise SkipTest # Not compatible with MR2
@@ -258,17 +259,17 @@ class TestJobBrowserWithHadoop(unittest.TestCase, OozieServerProvider):
   def test_jobs_page(self):
     # All jobs page and fetch job ID
     # Taking advantage of the fact new jobs are at the top of the list!
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json'})
     assert_true(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content, response.content)
 
     # Make sure job succeeded
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&state=completed')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'state': 'completed'})
     assert_true(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&state=failed')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'state': 'failed'})
     assert_false(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&state=running')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'state': 'running'})
     assert_false(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&state=killed')
+    response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'state': 'killed'})
     assert_false(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
 
   def test_tasks_page(self):
@@ -286,14 +287,14 @@ class TestJobBrowserWithHadoop(unittest.TestCase, OozieServerProvider):
     # Login as ourself
     finish = SHARE_JOBS.set_for_testing(True)
     try:
-      response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&user=')
+      response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'user': ''})
       assert_true(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
     finally:
       finish()
 
     finish = SHARE_JOBS.set_for_testing(False)
     try:
-      response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/?format=json&user=')
+      response = TestJobBrowserWithHadoop.client.post('/jobbrowser/jobs/', {'format': 'json', 'user': ''})
       assert_true(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
     finally:
       finish()
@@ -304,14 +305,14 @@ class TestJobBrowserWithHadoop(unittest.TestCase, OozieServerProvider):
 
     finish = SHARE_JOBS.set_for_testing(True)
     try:
-      response = client_not_me.get('/jobbrowser/jobs/?format=json&user=')
+      response = client_not_me.post('/jobbrowser/jobs/', {'format': 'json', 'user': ''})
       assert_true(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
     finally:
       finish()
 
     finish = SHARE_JOBS.set_for_testing(False)
     try:
-      response = client_not_me.get('/jobbrowser/jobs/?format=json&user=')
+      response = client_not_me.post('/jobbrowser/jobs/', {'format': 'json', 'user': ''})
       assert_false(TestJobBrowserWithHadoop.hadoop_job_id_short in response.content)
     finally:
       finish()
@@ -342,15 +343,23 @@ class TestJobBrowserWithHadoop(unittest.TestCase, OozieServerProvider):
     response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/%s/tasks?tasktext=clean' % (TestJobBrowserWithHadoop.hadoop_job_id,))
     assert_true(len(response.context['page'].object_list), 1)
 
-  def test_job_single_logs_page(self):
-    raise SkipTest
+  def test_job_single_logs(self):
+    if not is_live_cluster():
+      raise SkipTest
 
-    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/%s/single_logs' % (TestJobBrowserWithHadoop.hadoop_job_id))
-    assert_true('syslog' in response.content, response.content)
-    assert_true('<div class="tab-pane active" id="logsSysLog">' in response.content or
-                '<div class="tab-pane active" id="logsStdErr">' in response.content or # Depending on Hadoop
-                '<div class="tab-pane active" id="logsStdOut">' in response.content, # For jenkins
-                response.content)
+    response = TestJobBrowserWithHadoop.client.get('/jobbrowser/jobs/%s/single_logs?format=json' % (TestJobBrowserWithHadoop.hadoop_job_id))
+    json_resp = json.loads(response.content)
+
+    assert_true('logs' in json_resp)
+    assert_true('Log Type: stdout' in json_resp['logs'][1])
+    assert_true('Log Type: stderr' in json_resp['logs'][2])
+    assert_true('Log Type: syslog' in json_resp['logs'][3])
+
+    # Verify that syslog contains log information for a completed oozie job
+    match = re.search(r"^Log Type: syslog(.+)Log Length: (?P<log_length>\d+)(.+)$", json_resp['logs'][3], re.DOTALL)
+    assert_true(match and match.group(2), 'Failed to parse log length from syslog')
+    log_length = match.group(2)
+    assert_true(log_length > 0, 'Log Length is 0, expected content in syslog.')
 
 
 class TestMapReduce1NoHadoop:
@@ -397,7 +406,7 @@ class TestMapReduce2NoHadoop:
 
     resource_manager_api.get_resource_manager = lambda username: MockResourceManagerApi(username)
     mapreduce_api.get_mapreduce_api = lambda username: MockMapreduceApi(username)
-    history_server_api.get_history_server_api = lambda: HistoryServerApi()
+    history_server_api.get_history_server_api = lambda username: HistoryServerApi(username)
 
     self.finish = [
         YARN_CLUSTERS['default'].SUBMIT_TO.set_for_testing(True),
@@ -415,16 +424,16 @@ class TestMapReduce2NoHadoop:
       f()
 
   def test_jobs(self):
-    response = self.c.get('/jobbrowser/?format=json')
+    response = self.c.post('/jobbrowser/', {'format': 'json'})
     response_content = json.loads(response.content)
     assert_equal(len(response_content['jobs']), 4)
 
-    response = self.c.get('/jobbrowser/jobs/?format=json&text=W=MapReduce-copy2')
+    response = self.c.post('/jobbrowser/jobs/', {'format': 'json', 'text': 'W=MapReduce-copy2'})
     response_content = json.loads(response.content)
     assert_equal(len(response_content['jobs']), 1)
 
   def test_applications_no_start_time(self):
-    response = self.c.get('/jobbrowser/?format=json')
+    response = self.c.post('/jobbrowser/', {'format': 'json'})
     data = json.loads(response.content)
     job = [j for j in data['jobs'] if j['id'] == 'application_1428442704693_0007']
     assert_true(job, job)
@@ -462,7 +471,7 @@ class TestMapReduce2NoHadoop:
 
   def test_yarn_job(self):
     response = self.c.get('/jobbrowser/jobs/application_1428442704693_0007')
-    assert_equal(response.context['job'].jobId, 'application_1428442704693_0007')
+    assert_equal(response.context['job'].jobId, 'job_1356251510842_0009')
 
   def job_not_assigned(self):
     response = self.c.get('/jobbrowser/jobs/job_1356251510842_0009/job_not_assigned//my_url')
@@ -591,7 +600,7 @@ class MockResourceManagerApi:
         u'trackingUrl': u'http://N/A',
         u'user': u'test',
         u'vcoreSeconds': 1,
-    },
+    }
   }
 
   def __init__(self, user, rm_url=None): pass
@@ -785,7 +794,7 @@ class HistoryServerApi(MockMapreduce2Api):
               u'successfulReduceAttempts': 1, u'successfulMapAttempts': 2, u'uberized': False, u'reducesTotal': 1,
               u'state': u'SUCCEEDED', u'failedReduceAttempts': 0, u'mapsCompleted': 2,
               u'killedMapAttempts': 0, u'diagnostics': u'', u'mapsTotal': 2, u'user': u'test',
-              u'startTime': 1357151916268, u'avgReduceTime': 137,
+              u'startTime': 0, u'avgReduceTime': 137,
               u'finishTime': 1357151923925, u'name': u'oozie:action:T=map-reduce:W=MapReduce-copy:A=Sleep:ID=0000004-121223003201296-oozie-oozi-W',
               u'avgShuffleTime': 1421, u'queue': u'default', u'killedReduceAttempts': 0, u'failedMapAttempts': 0
           }

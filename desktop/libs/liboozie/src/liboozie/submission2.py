@@ -32,7 +32,7 @@ from hadoop.fs.hadoopfs import Hdfs
 from oozie.utils import convert_to_server_timezone
 
 from liboozie.oozie_api import get_oozie
-from liboozie.conf import REMOTE_DEPLOYMENT_DIR
+from liboozie.conf import REMOTE_DEPLOYMENT_DIR, USE_LIBPATH_FOR_JARS
 from liboozie.credentials import Credentials
 
 
@@ -79,10 +79,14 @@ class Submission(object):
 
     if local_tz and isinstance(self.job.data, dict):
       local_tz = self.job.data.get('properties')['timezone']
-    if 'start_date' in self.properties:
-      properties['start_date'] = convert_to_server_timezone(self.properties['start_date'], local_tz)
-    if 'end_date' in self.properties:
-      properties['end_date'] = convert_to_server_timezone(self.properties['end_date'], local_tz)
+
+    # Modify start_date & end_date only when it's a coordinator
+    from oozie.models2 import Coordinator
+    if type(self.job) is Coordinator:
+      if 'start_date' in self.properties:
+        properties['start_date'] = convert_to_server_timezone(self.properties['start_date'], local_tz)
+      if 'end_date' in self.properties:
+        properties['end_date'] = convert_to_server_timezone(self.properties['end_date'], local_tz)
 
     self.properties['security_enabled'] = self.api.security_enabled
 
@@ -102,6 +106,9 @@ class Submission(object):
     Returns the oozie job id if all goes well.
     """
 
+    if self.properties and 'oozie.use.system.libpath' not in self.properties:
+      self.properties['oozie.use.system.libpath'] = 'true'
+
     self.oozie_id = self.api.submit_job(self.properties)
     LOG.info("Submitted: %s" % (self,))
 
@@ -116,6 +123,12 @@ class Submission(object):
 
     self._update_properties(jt_address, deployment_dir)
     self.properties.update({'oozie.wf.application.path': deployment_dir})
+
+    if 'oozie.coord.application.path' in self.properties:
+      self.properties.pop('oozie.coord.application.path')
+
+    if 'oozie.bundle.application.path' in self.properties:
+      self.properties.pop('oozie.bundle.application.path')
 
     if fail_nodes:
       self.properties.update({'oozie.wf.rerun.failnodes': fail_nodes})
@@ -160,9 +173,10 @@ class Submission(object):
     return self.oozie_id
 
 
-  def deploy(self):
+  def deploy(self, deployment_dir=None):
     try:
-      deployment_dir = self._create_deployment_dir()
+      if not deployment_dir:
+        deployment_dir = self._create_deployment_dir()
     except Exception, ex:
       msg = _("Failed to create deployment directory: %s" % ex)
       LOG.exception(msg)
@@ -178,12 +192,28 @@ class Submission(object):
         # Don't support more than one level sub-workflow
         if action.data['type'] == 'subworkflow':
           from oozie.models2 import Workflow
-          workflow = Workflow(document=Document2.objects.get_by_uuid(uuid=action.data['properties']['workflow']))
+          workflow = Workflow(document=Document2.objects.get_by_uuid(user=self.user, uuid=action.data['properties']['workflow']))
           sub_deploy = Submission(self.user, workflow, self.fs, self.jt, self.properties)
           workspace = sub_deploy.deploy()
 
           self.job.override_subworkflow_id(action, workflow.id) # For displaying the correct graph
           self.properties['workspace_%s' % workflow.uuid] = workspace # For pointing to the correct workspace
+        elif action.data['type'] == 'hive-document':
+          from notebook.models import Notebook
+          notebook = Notebook(document=Document2.objects.get_by_uuid(user=self.user, uuid=action.data['properties']['uuid']))
+
+          self._create_file(deployment_dir, action.data['name'] + '.sql', notebook.get_str())
+        elif action.data['type'] == 'java-document':
+          from notebook.models import Notebook
+          notebook = Notebook(document=Document2.objects.get_by_uuid(user=self.user, uuid=action.data['properties']['uuid']))
+          properties = notebook.get_data()['snippets'][0]['properties']
+
+          if properties.get('app_jar'):
+            LOG.debug("Adding to oozie.libpath %s" % properties['app_jar'])
+            paths = [properties['app_jar']]
+            if self.properties.get('oozie.libpath'):
+              paths.append(self.properties['oozie.libpath'])
+            self.properties['oozie.libpath'] = ','.join(paths)
 
     oozie_xml = self.job.to_xml(self.properties)
     self._do_as(self.user.username, self._copy_files, deployment_dir, oozie_xml, self.properties)
@@ -307,18 +337,27 @@ class Submission(object):
           if not jar_path.startswith(lib_path): # If not already in lib
             files.append(jar_path)
 
-    # Copy the jar files to the workspace lib
-    if files:
-      for jar_file in files:
-        LOG.debug("Updating %s" % jar_file)
-        jar_lib_path = self.fs.join(lib_path, self.fs.basename(jar_file))
-        # Refresh if needed
-        if self.fs.exists(jar_lib_path) and self.fs.exists(jar_file):
-          stat_src = self.fs.stats(jar_file)
-          stat_dest = self.fs.stats(jar_lib_path)
-          if stat_src.fileId != stat_dest.fileId:
-            self.fs.remove(jar_lib_path, skip_trash=True)
-        self.fs.copyfile(jar_file, jar_lib_path)
+    if USE_LIBPATH_FOR_JARS.get():
+      # Add the jar files to the oozie.libpath
+      if files:
+        files = list(set(files))
+        LOG.debug("Adding to oozie.libpath %s" % files)
+        if self.properties.get('oozie.libpath'):
+          files.append(self.properties['oozie.libpath'])
+        self.properties['oozie.libpath'] = ','.join(files)
+    else:
+      # Copy the jar files to the workspace lib
+      if files:
+        for jar_file in files:
+          LOG.debug("Updating %s" % jar_file)
+          jar_lib_path = self.fs.join(lib_path, self.fs.basename(jar_file))
+          # Refresh if needed
+          if self.fs.exists(jar_lib_path) and self.fs.exists(jar_file):
+            stat_src = self.fs.stats(jar_file)
+            stat_dest = self.fs.stats(jar_lib_path)
+            if stat_src.fileId != stat_dest.fileId:
+              self.fs.remove(jar_lib_path, skip_trash=True)
+          self.fs.copyfile(jar_file, jar_lib_path)
 
   def _do_as(self, username, fn, *args, **kwargs):
     prev_user = self.fs.user
@@ -348,12 +387,12 @@ class Submission(object):
     return Coordinator.PROPERTY_APP_PATH in self.properties
 
   def _create_file(self, deployment_dir, file_name, data, do_as=False):
-   file_path = self.fs.join(deployment_dir, file_name)
-   if do_as:
-     self.fs.do_as_user(self.user, self.fs.create, file_path, overwrite=True, permission=0644, data=smart_str(data))
-   else:
-     self.fs.create(file_path, overwrite=True, permission=0644, data=smart_str(data))
-   LOG.debug("Created/Updated %s" % (file_path,))
+    file_path = self.fs.join(deployment_dir, file_name)
+    if do_as:
+      self.fs.do_as_user(self.user, self.fs.create, file_path, overwrite=True, permission=0644, data=smart_str(data))
+    else:
+      self.fs.create(file_path, overwrite=True, permission=0644, data=smart_str(data))
+    LOG.debug("Created/Updated %s" % (file_path,))
 
 def create_directories(fs, directory_list=[]):
   # If needed, create the remote home, deployment and data directories

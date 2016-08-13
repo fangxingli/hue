@@ -79,13 +79,27 @@ CONFIG_TEMPLATE_PATH = Config(
   type=str,
   default=os.path.join(os.path.dirname(__file__), '..', 'data', 'solrconfigs'))
 
+CONFIG_INDEXING_TEMPLATES_PATH = Config(
+  key="config_oozie_workspace_path",
+  help=_t("oozie workspace template for indexing:"),
+  type=str,
+  default=os.path.join(os.path.dirname(__file__), '..', 'data', 'oozie_workspace')
+  )
+
+CONFIG_INDEXER_LIBS_PATH = Config(
+  key="config_indexer_libs_path",
+  help=_t("oozie workspace template for indexing:"),
+  type=str,
+  default='/tmp/smart_indexer_lib'
+  )
+
 SOLRCTL_PATH = Config(
   key="solrctl_path",
   help=_t("Location of the solrctl binary."),
   type=str,
   dynamic_default=solrctl)
 
-# Deprecated
+# Deprecated and not used anymore
 SOLR_ZK_ENSEMBLE = Config(
   key="solr_zk_ensemble",
   help=_t("Zookeeper ensemble."),

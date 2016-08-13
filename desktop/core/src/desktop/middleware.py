@@ -305,7 +305,7 @@ class LoginAndPermissionMiddleware(object):
         app_accessed = ui_app_accessed
 
       if app_accessed and \
-          app_accessed not in ("desktop", "home", "home2", "about") and \
+          app_accessed not in ("desktop", "home", "home2", "about", "notebook") and \
           not (request.user.has_hue_permission(action="access", app=app_accessed) or
                request.user.has_hue_permission(action=access_view, app=app_accessed)):
         access_log(request, 'permission denied', level=access_log_level)
@@ -669,4 +669,18 @@ class MetricsMiddleware(object):
   def process_response(self, request, response):
     self._response_timer.stop()
     metrics.active_requests.dec()
+    return response
+
+
+class ContentSecurityPolicyMiddleware(object):
+  def __init__(self, get_response=None):
+    self.secure_content_security_policy = desktop.conf.SECURE_CONTENT_SECURITY_POLICY.get()
+    if not self.secure_content_security_policy:
+      LOG.info('Unloading ContentSecurityPolicyMiddleware')
+      raise exceptions.MiddlewareNotUsed
+
+  def process_response(self, request, response):
+    if self.secure_content_security_policy and not 'Content-Security-Policy' in response:
+      response["Content-Security-Policy"] = self.secure_content_security_policy
+
     return response

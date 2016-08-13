@@ -285,17 +285,23 @@ function setLayout(colSizes, vm) {
   $(document).trigger("setLayout");
 }
 
-function ChangeTracker(objectToTrack, hashFunction) {
-  hashFunction = hashFunction || ko.toJSON;
+function ChangeTracker(objectToTrack, ko) {
+  var hashFunction = typeof ko.mapping !== 'undefined' ? ko.mapping.toJSON : ko.toJSON;
   var lastCleanState = ko.observable(hashFunction(objectToTrack));
+
+  var MAPPING = {
+    ignore: [
+      "isDirty"
+    ]
+  };
 
   var result = {
     somethingHasChanged: ko.dependentObservable(function () {
       $(document).trigger("viewmodelHasChanged");
-      return hashFunction(objectToTrack) != lastCleanState()
-    }),
+      return hashFunction(objectToTrack, MAPPING) != lastCleanState()
+    }).extend({rateLimit: 500}),
     markCurrentStateAsClean: function () {
-      lastCleanState(hashFunction(objectToTrack));
+      lastCleanState(hashFunction(objectToTrack, MAPPING));
     }
   };
 

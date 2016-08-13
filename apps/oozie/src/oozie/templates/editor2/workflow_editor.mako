@@ -43,6 +43,7 @@ ${ commonheader(_("Workflow Editor"), "Oozie", user, "40px") | n,unicode }
     <a title="${ _('Submit') }" rel="tooltip" data-placement="bottom" data-bind="click: showSubmitPopup, css: {'btn': true, 'disabled': workflow.isDirty()}, visible: workflow.id() != null">
       <i class="fa fa-fw fa-play"></i>
     </a>
+
     <a title="${ _('Schedule') }" rel="tooltip" data-placement="bottom" data-bind="click: schedule, css: {'btn': true, 'disabled': workflow.isDirty()}, visible: workflow.id() != null">
       <i class="fa fa-fw fa-calendar"></i>
     </a>
@@ -105,8 +106,24 @@ ${ layout.menubar(section='workflows', is_editor=True, pullright=buttons) }
 
 <%dashboard:layout_toolbar>
   <%def name="skipLayout()"></%def>
-  <%def name="widgetSectionName()">${ _('ACTIONS') }</%def>
+  <%def name="widgetSectionName()">${ _('DOCUMENTS') }</%def>
   <%def name="widgets()">
+    <div data-bind="css: { 'draggable-widget': true },
+                    draggable: {data: draggableHiveDocumentAction(), isEnabled: true,
+                    options: {'refreshPositions': true, 'stop': function(){ $root.isDragging(false); }, 'start': function(event, ui){ $root.isDragging(true); $root.currentlyDraggedWidget(draggableHiveDocumentAction());}}}"
+         title="${_('Saved Hive query')}" rel="tooltip" data-placement="top">
+         <a class="draggable-icon"><img src="${ static('oozie/art/icon_beeswax_48.png') }" class="app-icon"><sup style="color: #338bb8; margin-left: -4px; top: -14px; font-size: 12px">2</sup></a>
+    </div>
+
+    <div data-bind="css: { 'draggable-widget': true },
+                    draggable: {data: draggableJavaDocumentAction(), isEnabled: true,
+                    options: {'refreshPositions': true, 'stop': function(){ $root.isDragging(false); }, 'start': function(event, ui){ $root.isDragging(true); $root.currentlyDraggedWidget(draggableJavaDocumentAction());}}}"
+         title="${_('Saved Java program')}" rel="tooltip" data-placement="top">
+         <a class="draggable-icon"><i class="fa fa-file-code-o"></i></a>
+    </div>
+
+    <div class="toolbar-label">${ _('ACTIONS') }</div>
+
     <div data-bind="css: { 'draggable-widget': true },
                     draggable: {data: draggableHiveAction(), isEnabled: true,
                     options: {'refreshPositions': true, 'stop': function(){ $root.isDragging(false); }, 'start': function(event, ui){ $root.isDragging(true); $root.currentlyDraggedWidget(draggableHiveAction());}}}"
@@ -259,6 +276,18 @@ ${ workflow.render() }
           <!-- ko if: type() == 'workflow' -->
           <select data-bind="options: $root.subworkflows, optionsText: 'name', optionsValue: 'value', value: value"></select>
           <!-- /ko -->
+          <!-- ko if: type() == 'hive' || type() == 'java' -->
+          <select data-bind="options: type() == 'java' ? $root.javaQueries() : $root.hiveQueries(), optionsText: 'name', optionsValue: 'uuid', value: value, select2Version4:{ placeholder: '${ _ko('Document name...')}'}"></select>
+          <!-- ko if: $root.getDocumentById(type(), value()) -->
+            <!-- ko with: $root.getDocumentById(type(), value()) -->
+              <a href="#" data-bind="attr: { href: $data.absoluteUrl() }" target="_blank" title="${ _('Open') }">
+                <i class="fa fa-external-link-square"></i>
+              </a>
+              </br>
+              <span data-bind='text: $data.description' class="muted"></span>
+            <!-- /ko -->
+          <!-- /ko -->
+          <!-- /ko -->
 
           <!-- ko if: type() == 'distcp' -->
           <ul class="unstyled">
@@ -374,11 +403,13 @@ ${ workflow.render() }
           <!-- ko foreach: Object.keys($data.history.properties) -->
           <dt data-bind="text: $data"></dt>
           <dd>
-            <!-- ko if: typeof $parent.history.properties[$data]() == 'string' && $parent.history.properties[$data]().indexOf('/') == 0 -->
-              <a data-bind="text: $parent.history.properties[$data], attr: { href: '/filebrowser/view=' + $root.workflow.properties.deployment_dir() }" target="_blank"></a>
-            <!-- /ko -->
-            <!-- ko ifnot: typeof $parent.history.properties[$data]() == 'string' && $parent.history.properties[$data]().indexOf('/') == 0 -->
-            <span data-bind="text: $parent.history.properties[$data]"></span>
+            <!-- ko if: typeof $parent.history.properties[$data] == 'function' -->
+              <!-- ko if: typeof $parent.history.properties[$data]() == 'string' && $parent.history.properties[$data]().indexOf('/') == 0 -->
+                <a data-bind="text: $parent.history.properties[$data], attr: { href: '/filebrowser/view=' + $root.workflow.properties.deployment_dir() }" target="_blank"></a>
+              <!-- /ko -->
+              <!-- ko ifnot: typeof $parent.history.properties[$data]() == 'string' && $parent.history.properties[$data]().indexOf('/') == 0 -->
+              <span data-bind="text: $parent.history.properties[$data]"></span>
+              <!-- /ko -->
             <!-- /ko -->
           </dd>
           <!-- /ko -->
@@ -415,6 +446,7 @@ ${ workflow.render() }
 <link rel="stylesheet" href="${ static('desktop/ext/css/hue-filetypes.css') }">
 <link rel="stylesheet" href="${ static('desktop/ext/css/hue-charts.css') }">
 <link rel="stylesheet" href="${ static('desktop/ext/chosen/chosen.min.css') }">
+<link rel="stylesheet" href="${ static('desktop/ext/css/select2.min.css') }">
 <link rel="stylesheet" href="${ static('oozie/css/common-editor.css') }">
 <link rel="stylesheet" href="${ static('oozie/css/workflow-editor.css') }">
 
@@ -427,7 +459,8 @@ ${ commonshare() | n,unicode }
 <script src="${ static('desktop/js/hue.utils.js') }"></script>
 <script src="${ static('desktop/js/ko.editable.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/chosen/chosen.jquery.min.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/js/share.vm.js') }"></script>
+<script src="${ static('desktop/js/select2.full.patched.js') }" type="text/javascript" charset="utf-8"></script>
+<script src="${ static('desktop/js/share2.vm.js') }"></script>
 <script src="${ static('desktop/js/jquery.hdfsautocomplete.js') }" type="text/javascript" charset="utf-8"></script>
 
 ${ dashboard.import_bindings() }
@@ -454,7 +487,7 @@ ${ dashboard.import_bindings() }
   ko.applyBindings(viewModel, $("#editor")[0]);
 
   var shareViewModel = initSharing("#documentShareModal");
-  shareViewModel.setDocId(${ doc1_id });
+  shareViewModel.setDocUuid('${ doc_uuid }');
 
   viewModel.init();
   viewModel.workflow.tracker().markCurrentStateAsClean();

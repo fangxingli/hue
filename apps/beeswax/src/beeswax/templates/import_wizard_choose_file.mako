@@ -76,7 +76,6 @@ ${ assist.assistPanel() }
                   }],
                   navigationSettings: {
                     openItem: false,
-                    showPreview: true,
                     showStats: true
                   }
                 },
@@ -151,18 +150,18 @@ ${ assist.assistPanel() }
                         )}
                         <span  class="help-inline">${unicode(file_form["path"].errors) | n}</span>
                     <span class="help-block">
-                    ${_('The HDFS path to the file on which to base this new table definition. It can be compressed (gzip) or not.')}
+                    ${_('The path to the file(s) or directory on which to base this new table definition. It can be compressed (gzip) or not.')}
                     </span>
                     </div>
                 </div>
                 <div class="control-group">
-                  ${comps.bootstrapLabel(file_form["do_import"])}
+                  ${comps.bootstrapLabel(file_form["load_data"])}
                   <div class="controls">
-                    ${comps.field(file_form["do_import"], render_default=True)}
+                    ${comps.field(file_form["load_data"], render_default=True)}
                     <span class="help-block">
-                    ${_('Check this box to import the data in this file after creating the table definition. Leave it unchecked to define an empty table.')}
+                    ${_('Select whether table data should be imported, external or empty.')}
                     <div id="fileWillBeMoved" class="alert">
-                        <strong>${_('Warning:')}</strong> ${_('The selected file is going to be moved during the import.')}
+                      <strong>${_('Warning:')}</strong> ${_('The selected file is going to be moved during the import.')}
                     </div>
                   </span>
                   </div>
@@ -214,23 +213,23 @@ ${ assist.assistPanel() }
   require([
     "knockout",
     "ko.charts",
-    "desktop/js/assist/assistHelper",
+    "desktop/js/apiHelper",
     "assistPanel",
     "tableStats",
     "knockout-mapping",
     "knockout-sortable",
     "ko.editable",
     "ko.hue-bindings"
-  ], function (ko, charts, AssistHelper) {
+  ], function (ko, charts, ApiHelper) {
 
     ko.options.deferUpdates = true;
 
     function MetastoreViewModel(options) {
       var self = this;
-      self.assistHelper = AssistHelper.getInstance(options);
+      self.apiHelper = ApiHelper.getInstance(options);
       self.assistAvailable = ko.observable(true);
       self.isLeftPanelVisible = ko.observable();
-      self.assistHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
+      self.apiHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
 
 
       huePubSub.subscribe("assist.table.selected", function (tableDef) {
@@ -263,18 +262,29 @@ ${ assist.assistPanel() }
       $(".fileChooserBtn").click(function (e) {
         e.preventDefault();
         var _destination = $(this).attr("data-filechooser-destination");
+        var initialLoadValue = $('#id_load_data').val();
+        function handleChoice(filePath){
+          $("input[name='" + _destination + "']").val(filePath);
+          $("#chooseFile").modal("hide");
+          if (filePath.toLowerCase().indexOf('s3') === 0){
+            $('#id_load_data').val('EXTERNAL').trigger('change').find('option[value="IMPORT"]').attr('disabled', 'disabled');
+          }
+          else {
+            $('#id_load_data').val(initialLoadValue).trigger('change').find('option[value="IMPORT"]').removeAttr('disabled');
+          }
+        }
         $("#filechooser").jHueFileChooser({
           initialPath: $("input[name='" + _destination + "']").val(),
-          onFileChoose: function (filePath) {
-            $("input[name='" + _destination + "']").val(filePath);
-            $("#chooseFile").modal("hide");
-          },
-          createFolder: false
+          onFileChoose: handleChoice,
+          onFolderChoose: handleChoice,
+          createFolder: $('#id_load_data').val() === 'EXTERNAL',
+          selectFolder: $('#id_load_data').val() === 'EXTERNAL',
+          displayOnlyFolders: $('#id_load_data').val() === 'EXTERNAL'
         });
         $("#chooseFile").modal("show");
       });
-      $("#id_do_import").change(function () {
-        if ($(this).is(":checked")) {
+      $("#id_load_data").change(function () {
+        if ($(this).val() === 'IMPORT') {
           $("#fileWillBeMoved").show();
         }
         else {

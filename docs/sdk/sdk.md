@@ -303,7 +303,7 @@ should see something like:
 
 Integrate external Web applications in any language
 ===================================================
-Use the [create_proxy_app command](http://gethue.tumblr.com/post/66367939672/integrate-external-web-applications-in-any-language)
+Use the [create_proxy_app command](http://gethue.com/integrate-external-web-applications-in-any-language)
 
 
 A Look at Three Existing Apps
@@ -785,6 +785,16 @@ like this (in your mako template):
 
     <!-- show a trash icon in a link -->
     <a href="#something"><i class="icon-trash"></i> Trash</a>
+
+Static files
+------------
+
+For better performances, Hue uses the Django staticfiles app. If in production mode, if you edit
+some static files, you would need to run this command or `make apps`. No actions are needed in
+development mode.
+<pre>
+./build/env/bin/hue collectstatic
+</pre>
 
 Adding Interactive Elements to Your UI
 --------------------------------------

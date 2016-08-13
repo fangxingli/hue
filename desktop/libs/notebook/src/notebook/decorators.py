@@ -25,10 +25,10 @@ from django.utils.translation import ugettext as _
 
 from desktop.lib.django_util import JsonResponse
 from desktop.lib.exceptions_renderable import PopupException
-from desktop.lib.i18n import force_unicode
+from desktop.lib.i18n import smart_unicode
 from desktop.models import Document2, Document
 
-from notebook.connectors.base import QueryExpired, QueryError, SessionExpired, AuthenticationRequired
+from notebook.connectors.base import QueryExpired, QueryError, SessionExpired, AuthenticationRequired, OperationTimeout
 
 
 LOG = logging.getLogger(__name__)
@@ -37,14 +37,17 @@ LOG = logging.getLogger(__name__)
 def check_document_access_permission():
   def inner(view_func):
     def decorate(request, *args, **kwargs):
-      notebook_id = request.GET.get('notebook')
+      notebook_id = request.GET.get('notebook', request.GET.get('editor'))
       if not notebook_id:
         notebook_id = json.loads(request.POST.get('notebook', '{}')).get('id')
 
       try:
         if notebook_id:
-          document = Document2.objects.get(id=notebook_id)
-          document.can_read_or_exception(request.user)
+          if str(notebook_id).isdigit():
+            document = Document2.objects.get(id=notebook_id)
+            document.can_read_or_exception(request.user)
+          else:
+            Document2.objects.get_by_uuid(user=request.user, uuid=notebook_id)
       except Document2.DoesNotExist:
         raise PopupException(_('Document %(id)s does not exist') % {'id': notebook_id})
 
@@ -83,16 +86,23 @@ def api_error_handler(func):
     except AuthenticationRequired, e:
       response['status'] = 401
     except ValidationError, e:
+      LOG.exception('Error validation %s' % func)
       response['status'] = -1
       response['message'] = e.message
+    except OperationTimeout, e:
+      response['status'] = -4
     except QueryError, e:
-      LOG.exception('error running %s' % func)
+      LOG.exception('Error running %s' % func)
       response['status'] = 1
-      response['message'] = force_unicode(str(e))
+      response['message'] = smart_unicode(e)
+      if e.handle:
+        response['handle'] = e.handle
+      if e.extra:
+        response.update(e.extra)
     except Exception, e:
-      LOG.exception('error running %s' % func)
+      LOG.exception('Error running %s' % func)
       response['status'] = -1
-      response['message'] = force_unicode(str(e))
+      response['message'] = smart_unicode(e)
     finally:
       if response:
         return JsonResponse(response)

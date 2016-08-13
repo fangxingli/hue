@@ -22,12 +22,43 @@
 
 ${ commonheader(_("Notebooks"), "spark", user, "60px") | n,unicode }
 
+
+<div class="navbar navbar-inverse navbar-fixed-top" data-bind="visible: ! $root.isPlayerMode()">
+  <div class="navbar-inner">
+    <div class="container-fluid">
+      <div class="nav-collapse">
+        <ul class="nav editor-nav">
+          <li class="currentApp">
+              <a href="${ url('notebook:editor') }?type=${ editor_type }" title="${ _('%s Editor') % editor_type.title() }" style="cursor: pointer">
+              % if editor_type == 'impala':
+                <img src="${ static('impala/art/icon_impala_48.png') }" class="app-icon" />
+                ${ _('Impala Queries') }
+              % elif editor_type == 'rdbms':
+                <img src="${ static('rdbms/art/icon_rdbms_48.png') }" class="app-icon" />
+                ${ _('SQL Queries') }
+              % elif editor_type == 'pig':
+                <img src="${ static('pig/art/icon_pig_48.png') }" class="app-icon" />
+                ${ _('Pig Scripts') }
+              % elif editor_type in ('beeswax', 'hive'):
+                <img src="${ static('beeswax/art/icon_beeswax_48.png') }" class="app-icon" />
+                ${ _('Hive Queries') }
+              % else:
+                <img src="${ static('rdbms/art/icon_rdbms_48.png') }" class="app-icon" />
+                ${ _('Notebooks') }
+              % endif
+              </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <div id="editor">
 
-<div class="container-fluid">
+<div class="container-fluid margin-top-20">
   <div class="card card-small">
-  <h1 class="card-heading simple">${ _('Notebooks') }</h1>
-
   <%actionbar:render>
     <%def name="search()">
       <input id="filterInput" type="text" class="input-xlarge search-query" placeholder="${_('Search for name, description, etc...')}">
@@ -56,7 +87,13 @@ ${ commonheader(_("Notebooks"), "spark", user, "60px") | n,unicode }
     </%def>
 
     <%def name="creation()">
-      <a href="${ url('notebook:new') }" class="btn"><i class="fa fa-plus-circle"></i> ${ _('Create') }</a>
+      % if editor_type != 'notebook':
+        <a href="${ url('notebook:editor') }?type=${ editor_type }" class="btn">
+      % else:
+        <a href="${ url('notebook:new') }" class="btn">
+      % endif
+        <i class="fa fa-plus-circle"></i> ${ _('Create') }
+      </a>
       <a data-bind="click: function() { $('#import-documents').modal('show'); }" class="btn">
         <i class="fa fa-upload"></i> ${ _('Import') }
       </a>
@@ -83,7 +120,7 @@ ${ commonheader(_("Notebooks"), "spark", user, "60px") | n,unicode }
         <td data-bind="text: name"></td>
         <td data-bind="text: description"></td>
         <td data-bind="text: owner"></td>
-        <td data-bind="text: last_modified, attr: { 'data-sort-value': last_modified_ts }" data-type="date"></td>
+        <td data-bind="text: localeFormat(last_modified), attr: { 'data-sort-value': last_modified_ts }" data-type="date"></td>
       </tr>
     </tbody>
   </table>
@@ -108,7 +145,18 @@ ${ commonheader(_("Notebooks"), "spark", user, "60px") | n,unicode }
     ${ csrf_token(request) | n,unicode }
     <div class="modal-header">
       <a href="#" class="close" data-dismiss="modal">&times;</a>
+      % if editor_type == 'pig':
+      <h3 id="deleteNotebookMessage">${ _('Delete the selected script(s)?') }</h3>
+      % elif editor_type in ('beeswax', 'hive', 'rdbms', 'impala'):
+      <!-- ko if: selectedJobs().length == 1 -->
+      <h3 id="deleteNotebookMessage">${ _('Delete the selected query?') }</h3>
+      <!-- /ko -->
+      <!-- ko if: selectedJobs().length >1 -->
+      <h3 id="deleteNotebookMessage">${ _('Delete the selected queries?') }</h3>
+      <!-- /ko -->
+      % else:
       <h3 id="deleteNotebookMessage">${ _('Delete the selected notebook(s)?') }</h3>
+      % endif
     </div>
     <div class="modal-footer">
       <a href="#" class="btn" data-dismiss="modal">${ _('No') }</a>
@@ -130,7 +178,7 @@ ${ commonshare() | n,unicode }
 <script src="${ static('desktop/ext/js/knockout.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/knockout-mapping.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/ko.hue-bindings.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/js/share.vm.js') }"></script>
+<script src="${ static('desktop/js/share2.vm.js') }"></script>
 
 <script type="text/javascript" charset="utf-8">
   var Editor = function () {
@@ -152,14 +200,14 @@ ${ commonshare() | n,unicode }
 
     self.handleSelect = function(notebook) {
       notebook.isSelected(! notebook.isSelected());
-    }
+    };
 
     self.selectAll = function() {
       self.allSelected(! self.allSelected());
       ko.utils.arrayForEach(self.jobs(), function (job) {
         job.isSelected(self.allSelected());
       });
-    }
+    };
 
     self.datatable = null;
 
@@ -190,7 +238,7 @@ ${ commonshare() | n,unicode }
     };
 
     self.prepareShareModal = function() {
-      shareViewModel.setDocId(self.selectedJobs()[0].doc1_id());
+      shareViewModel.setDocUuid(self.selectedJobs()[0].uuid());
       openShareModal();
     };
   }
@@ -203,7 +251,7 @@ ${ commonshare() | n,unicode }
     ko.applyBindings(viewModel, $("#editor")[0]);
 
     shareViewModel = initSharing("#documentShareModal");
-    shareViewModel.setDocId(-1);
+    shareViewModel.setDocUuid('');
 
     $(document).on("showSubmitPopup", function(event, data){
       $('#submit-notebook-modal').html(data);

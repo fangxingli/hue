@@ -217,6 +217,7 @@ ${ commonshare() | n,unicode }
 
   .left-panel {
     position: absolute;
+    outline: none !important;
   }
 
   .resizer {
@@ -234,6 +235,7 @@ ${ commonshare() | n,unicode }
 
   .right-panel {
     position: absolute;
+    outline: none !important;
   }
 
   #filechooser {
@@ -358,6 +360,7 @@ ${ commonshare() | n,unicode }
 
 </style>
 
+<script src="${ static('desktop/js/hue.json.js') }"></script>
 <script src="${ static('desktop/ext/js/jquery/plugins/jquery-ui-1.10.4.draggable-droppable-sortable.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/knockout.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/knockout-mapping.min.js') }" type="text/javascript" charset="utf-8"></script>
@@ -831,6 +834,11 @@ ${ commonshare() | n,unicode }
     $.jHueNotify.info("${_('Query saved successfully!')}")
   });
 
+  // Initial htmlEscape
+  String.prototype.htmlEscape = function() {
+    return $('<div/>').text(this.toString()).html();
+  };
+
   var dataTable = null;
   function cleanResultsTable() {
     if (dataTable) {
@@ -855,7 +863,7 @@ ${ commonshare() | n,unicode }
           ordered_row.push(index + row_index + 1);
         }
         else {
-          ordered_row.push(row[col]);
+          ordered_row.push(row[col]).toString().htmlEscape();
         }
       });
       dataTable.fnAddData(ordered_row);

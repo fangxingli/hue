@@ -137,7 +137,7 @@ var Node = function (node) {
   };
 
   self.fetch_parameters = function () {
-    if (typeof self.properties.parameters != "undefined" && !self.actionParametersFetched()) { // Fetch once the possible variable when they exist
+    if (typeof self.properties.parameters != "undefined" && ! self.actionParametersFetched()) { // Fetch once the possible variable when they exist
       $.post("/oozie/editor/workflow/action/parameters/", {
         "node": ko.mapping.toJSON(self),
       }, function (data) {
@@ -165,6 +165,13 @@ var Node = function (node) {
       self.actionParametersFetched(false);
     });
   }
+
+  if (type == 'hive-document-widget' && typeof self.properties.uuid != "undefined") {
+    self.properties.uuid.subscribe(function () {
+      self.actionParametersFetched(false);
+      self.fetch_parameters();
+    });
+  }
 }
 
 
@@ -176,7 +183,7 @@ var Workflow = function (vm, workflow) {
   self.uuid = ko.observable(typeof workflow.uuid != "undefined" && workflow.uuid != null ? workflow.uuid : UUID());
   self.name = ko.observable(typeof workflow.name != "undefined" && workflow.name != null ? workflow.name : "");
 
-  self.tracker = new ChangeTracker(self); // from ko.common-dashboard.js
+  self.tracker = new ChangeTracker(self, ko); // from ko.common-dashboard.js
 
   self.isDirty = ko.computed(function () {
     return self.tracker().somethingHasChanged();
@@ -491,6 +498,26 @@ var WorkflowEditorViewModel = function (layout_json, workflow_json, credentials_
     self.workflow_properties = ko.mapping.fromJS(workflow_properties_json);
     loadLayout(self, layout_json);
     self.workflow.loadNodes(workflow_json);
+
+    self.getDocuments('query-hive', self.hiveQueries);
+    self.getDocuments('query-java', self.javaQueries);
+  };
+
+  self.getDocuments = function(type, destination) {
+	$.get('/desktop/api2/docs/', {
+	    type: type,
+	    include_trashed: false,
+	    sort: '-last_modified',
+	    limit: 100
+	}, function(data) {
+	  if (data && data.documents) {
+	    var queries = [];
+	    $.each(data.documents, function(index, query) {
+	      queries.push(ko.mapping.fromJS(query));
+	    });
+	    destination(queries);
+	  }
+	});
   };
 
   self.addActionProperties = ko.observableArray([]);
@@ -516,7 +543,25 @@ var WorkflowEditorViewModel = function (layout_json, workflow_json, credentials_
 
 
   self.subworkflows = ko.observableArray(getOtherSubworkflows(self, subworkflows_json));
+  self.hiveQueries = ko.observableArray();
+  self.javaQueries = ko.observableArray();
   self.history = ko.mapping.fromJS(history_json);
+
+  self.getDocumentById = function (type, uuid) {
+    var _query = null;
+    if (type.indexOf('java') != -1) {
+      data = self.javaQueries();
+    } else {
+      data = self.hiveQueries();
+    }
+    $.each(data, function (index, query) {
+      if (query.uuid() == uuid) {
+        _query = query;
+        return false;
+      }
+    });
+    return _query;
+  };
 
   self.getSubWorkflow = function (uuid) {
     var wf = $.grep(self.subworkflows(), function (wf, i) {
@@ -1143,7 +1188,7 @@ var WorkflowEditorViewModel = function (layout_json, workflow_json, credentials_
             window.location.replace(data.url);
           }
           if (self.workflow.id() == null) {
-            shareViewModel.setDocId(data.doc1_id);
+            shareViewModel.setDocUuid(data.uuid);
           }
           self.workflow.id(data.id);
           $(document).trigger("info", data.message);
@@ -1227,7 +1272,8 @@ var WorkflowEditorViewModel = function (layout_json, workflow_json, credentials_
   self.draggableDistCpAction = ko.observable(bareWidgetBuilder("Distcp", "distcp-widget"));
   self.draggableSparkAction = ko.observable(bareWidgetBuilder("Spark", "spark-widget"));
   self.draggableGenericAction = ko.observable(bareWidgetBuilder("Generic", "generic-widget"));
-
+  self.draggableHiveDocumentAction = ko.observable(bareWidgetBuilder("Hive", "hive-document-widget"));
+  self.draggableJavaDocumentAction = ko.observable(bareWidgetBuilder("Java", "java-document-widget"));
   self.draggableKillNode = ko.observable(bareWidgetBuilder("Kill", "kill-widget"));
 };
 

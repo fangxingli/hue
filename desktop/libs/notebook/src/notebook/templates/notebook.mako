@@ -21,13 +21,14 @@
 
 <%namespace name="tableStats" file="/table_stats.mako" />
 <%namespace name="assist" file="/assist.mako" />
-<%namespace name="koComponents" file="/ko_components.mako" />
+<%namespace name="configKoComponents" file="/config_ko_components.mako" />
 <%namespace name="editorComponents" file="editor_components.mako" />
+<%namespace name="notebookKoComponents" file="notebook_ko_components.mako" />
 
 ${ commonheader(_('Notebook'), app_name, user, "68px") | n,unicode }
 
 ${ editorComponents.includes() }
-${ editorComponents.topBar('notebook') }
+${ editorComponents.topBar() }
 <%editorComponents:commonHTML>
   <%def name="addSnippetHTML()">
     <h1 class="empty" data-bind="visible: $root.availableSnippets().length == 0">${ _('There are no snippets configured.') }</h1>
@@ -49,13 +50,10 @@ ${ editorComponents.topBar('notebook') }
 
 ${ tableStats.tableStats() }
 ${ assist.assistPanel() }
-${ koComponents.csvListInput() }
-${ koComponents.keyValueListInput() }
-${ koComponents.hdfsFileListInput() }
-${ koComponents.functionListInput() }
-${ koComponents.jvmMemoryInput() }
-${ koComponents.addSnippetMenu() }
-${ koComponents.downloadSnippetResults() }
+${ configKoComponents.config() }
+${ notebookKoComponents.addSnippetMenu() }
+${ notebookKoComponents.downloadSnippetResults() }
+${ notebookKoComponents.snippetDbSelection() }
 
 ${ editorComponents.commonJS() }
 

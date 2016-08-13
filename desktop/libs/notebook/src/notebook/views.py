@@ -21,9 +21,13 @@ import logging
 from django.db.models import Q
 from django.utils.translation import ugettext as _
 
+from desktop.conf import USE_NEW_EDITOR
 from desktop.lib.django_util import render, JsonResponse
+from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.json_utils import JSONEncoderForHTML
 from desktop.models import Document2, Document
+
+from metadata.conf import has_optimizer, has_navigator
 
 from notebook.conf import get_interpreters
 from notebook.connectors.base import Notebook, get_api
@@ -37,21 +41,28 @@ LOG = logging.getLogger(__name__)
 
 
 def notebooks(request):
-  notebooks = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, qfilter=Q(extra='notebook') | Q(extra__startswith='query')) if not d.content_object.is_history]
+  editor_type = request.GET.get('type', 'notebook')
+
+  if editor_type != 'notebook':
+    if USE_NEW_EDITOR.get():
+      notebooks = [doc.to_dict() for doc in Document2.objects.documents(user=request.user).search_documents(types=['query-%s' % editor_type])]
+    else:
+      notebooks = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, qfilter=Q(extra__startswith='query')) if not d.content_object.is_history and d.content_object.type == 'query-' + editor_type]
+  else:
+    if USE_NEW_EDITOR.get():
+      notebooks = [doc.to_dict() for doc in Document2.objects.documents(user=request.user).search_documents(types=['notebook'])]
+    else:
+      notebooks = [d.content_object.to_dict() for d in Document.objects.get_docs(request.user, Document2, qfilter=Q(extra='notebook')) if not d.content_object.is_history]
 
   return render('notebooks.mako', request, {
-      'notebooks_json': json.dumps(notebooks, cls=JSONEncoderForHTML)
+      'notebooks_json': json.dumps(notebooks, cls=JSONEncoderForHTML),
+      'editor_type': editor_type
   })
 
 
 @check_document_access_permission()
 def notebook(request):
   notebook_id = request.GET.get('notebook')
-
-  if notebook_id:
-    notebook = Notebook(document=Document2.objects.get(id=notebook_id))
-  else:
-    notebook = Notebook()
 
   is_yarn_mode = False
   try:
@@ -61,12 +72,16 @@ def notebook(request):
     LOG.exception('Spark is not enabled')
 
   return render('notebook.mako', request, {
-      'notebooks_json': json.dumps([notebook.get_data()]),
+      'editor_id': notebook_id or None,
+      'notebooks_json': '{}',
       'options_json': json.dumps({
           'languages': get_interpreters(request.user),
-          'session_properties': SparkApi.PROPERTIES,
+          'session_properties': SparkApi.get_properties(),
+          'is_optimizer_enabled': has_optimizer(),
+          'is_navigator_enabled': has_navigator(),
+          'editor_type': 'notebook'
       }),
-      'is_yarn_mode': is_yarn_mode
+      'is_yarn_mode': is_yarn_mode,
   })
 
 
@@ -75,23 +90,20 @@ def editor(request):
   editor_id = request.GET.get('editor')
   editor_type = request.GET.get('type', 'hive')
 
-  if editor_id:
-    editor = Notebook(document=Document2.objects.get(id=editor_id))
-    editor_type = editor.get_data()['type'].rsplit('-', 1)[-1]
-  else:
-    editor = Notebook()
-    data = editor.get_data()
-    data['name'] = 'Untitled %s Query' % editor_type.title()
-    data['type'] = 'query-%s' % editor_type  # TODO: Add handling for non-SQL types
-    editor.data = json.dumps(data)
+  if editor_id:  # Open existing saved editor document
+    document = Document2.objects.get(id=editor_id)
+    editor_type = document.type.rsplit('-', 1)[-1]
 
   return render('editor.mako', request, {
-      'notebooks_json': json.dumps([editor.get_data()]),
+      'editor_id': editor_id or None,
+      'notebooks_json': '{}',
       'options_json': json.dumps({
           'languages': [{"name": "%s SQL" % editor_type.title(), "type": editor_type}],
           'mode': 'editor',
-      }),
-      'editor_type': editor_type,
+          'is_optimizer_enabled': has_optimizer(),
+          'is_navigator_enabled': has_navigator(),
+          'editor_type': editor_type
+      })
   })
 
 
@@ -117,19 +129,52 @@ def browse(request, database, table):
   })
 
 
+@check_document_access_permission()
+def execute_and_watch(request):
+  notebook_id = request.GET.get('editor', request.GET.get('notebook'))
+  snippet_id = int(request.GET['snippet'])
+  action = request.GET['action']
+  destination = request.GET['destination']
+
+  notebook = Notebook(document=Document2.objects.get(id=notebook_id)).get_data()
+  snippet = notebook['snippets'][snippet_id]
+  editor_type = snippet['type']
+
+  api = get_api(request, snippet)
+
+  if action == 'save_as_table':
+    sql, success_url = api.export_data_as_table(notebook, snippet, destination)
+    editor = make_notebook(name='Execute and watch', editor_type=editor_type, statement=sql, status='ready-execute')
+  elif action == 'insert_as_query':
+    sql, success_url = api.export_large_data_to_hdfs(notebook, snippet, destination)
+    editor = make_notebook(name='Execute and watch', editor_type=editor_type, statement=sql, status='ready-execute')
+  else:
+    raise PopupException(_('Action %s is unknown') % action)
+
+  return render('editor.mako', request, {
+      'notebooks_json': json.dumps([editor.get_data()]),
+      'options_json': json.dumps({
+          'languages': [{"name": "%s SQL" % editor_type.title(), "type": editor_type}],
+          'mode': 'editor',
+          'success_url': success_url
+      }),
+      'editor_type': editor_type,
+  })
+
+
 @check_document_modify_permission()
 def delete(request):
   notebooks = json.loads(request.POST.get('notebooks', '[]'))
 
+  ctr = 0
   for notebook in notebooks:
-    doc2 = Document2.objects.get_by_uuid(uuid=notebook['uuid'])
+    doc2 = Document2.objects.get_by_uuid(user=request.user, uuid=notebook['uuid'], perm_type='write')
     doc = doc2.doc.get()
     doc.can_write_or_exception(request.user)
+    doc2.trash()
+    ctr += 1
 
-    doc.delete()
-    doc2.delete()
-
-  return JsonResponse({})
+  return JsonResponse({'status': 0, 'message': _('Trashed %d notebook(s)') % ctr})
 
 
 @check_document_access_permission()
@@ -137,7 +182,7 @@ def copy(request):
   notebooks = json.loads(request.POST.get('notebooks', '[]'))
 
   for notebook in notebooks:
-    doc2 = Document2.objects.get_by_uuid(uuid=notebook['uuid'])
+    doc2 = Document2.objects.get_by_uuid(user=request.user, uuid=notebook['uuid'])
     doc = doc2.doc.get()
 
     name = doc2.name + '-copy'
@@ -172,3 +217,16 @@ def install_examples(request):
 
   return JsonResponse(response)
 
+
+def upgrade_session_properties(request, notebook):
+  # Upgrade session data if using old format
+  data = notebook.get_data()
+
+  for session in data.get('sessions', []):
+    api = get_api(request, session)
+    if 'type' in session and hasattr(api, 'upgrade_properties'):
+      properties = session.get('properties', None)
+      session['properties'] = api.upgrade_properties(session['type'], properties)
+
+  notebook.data = json.dumps(data)
+  return notebook

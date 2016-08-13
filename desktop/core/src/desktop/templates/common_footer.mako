@@ -51,25 +51,41 @@ ${ smart_unicode(login_modal(request).content) | n,unicode }
 
     // global catch for ajax calls after the user has logged out
     var isLoginRequired = false;
-    $(document).ajaxSuccess(function (event, xhr, settings, data) {
-      if (data === '/* login required */' && !isLoginRequired) {
+    $(document).ajaxComplete(function (event, xhr, settings) {
+      if (IDLE_SESSION_TIMEOUT == -1 && settings && settings.url === '/jobbrowser/jobs/') {
+        return;
+      }
+      if (xhr.responseText === '/* login required */' && !isLoginRequired) {
         isLoginRequired = true;
-        $('#login-modal').modal('show');
-        window.setTimeout(function () {
-          $('.jHueNotify').remove();
-        }, 200);
+        $('.blurred').removeClass('blurred');
+        $('body').children(':not(#login-modal)').addClass('blurred');
+        if ($('#login-modal').length > 0 && $('#login-modal').is(':hidden')){
+          $('#login-modal').modal('show');
+          window.setTimeout(function () {
+            $('.jHueNotify').remove();
+          }, 200);
+        }
+        else {
+          location.reload();
+        }
       }
     });
 
     $('#login-modal').on('hidden', function () {
       isLoginRequired = false;
+      $('.blurred').removeClass('blurred');
     });
 
     huePubSub.subscribe('hue.login.result', function (response) {
       if (response.auth) {
-        $('#login-modal').modal('hide');
-        $.jHueNotify.info('${ _('You have signed in successfully!') }');
-        $('#login-modal .login-error').addClass('hide');
+        if ($('#login-modal #id_username').val() !== LOGGED_USERNAME) { //LOGGED_USERNAME is in common_header
+          location.reload();
+        }
+        else {
+          $('#login-modal').modal('hide');
+          $.jHueNotify.info('${ _('You have signed in successfully!') }');
+          $('#login-modal .login-error').addClass('hide');
+        }
       }
       else {
         $('#login-modal .login-error').removeClass('hide');
@@ -171,7 +187,7 @@ ${ smart_unicode(login_modal(request).content) | n,unicode }
   $(".modal").on("shown", function () {
     _catchEnterKeyOnModals = true;
     // safe ux enhancement: focus on the first editable input
-    $(".modal:visible").find("input:not(.disable-autofocus):visible:first").focus();
+    $(".modal:visible").find('input:not(.disable-autofocus):visible:first').not($('.jHueFilechooserActions input')).focus();
   });
 
   $(".modal").on("hidden", function () {
@@ -199,28 +215,27 @@ ${ smart_unicode(login_modal(request).content) | n,unicode }
 
     %if collect_usage:
 
-      var _gaq = _gaq || [];
-      _gaq.push(['_setAccount', 'UA-40351920-1']);
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+      ga('create', 'UA-40351920-1', 'auto');
 
       // We collect only 2 path levels: not hostname, no IDs, no anchors...
       var _pathName = location.pathname;
       var _splits = _pathName.substr(1).split("/");
       _pathName = _splits[0] + (_splits.length > 1 && $.trim(_splits[1]) != "" ? "/" + _splits[1] : "");
 
-      _gaq.push(['_trackPageview', '/remote/${ version }/' + _pathName]);
-
-      (function () {
-        var ga = document.createElement('script');
-        ga.type = 'text/javascript';
-        ga.async = true;
-        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
-        var s = document.getElementsByTagName('script')[0];
-        s.parentNode.insertBefore(ga, s);
-      })();
+      ga('send', 'pageview', {
+        'page': '/remote/${ version }/' + _pathName
+      });
 
       function trackOnGA(path) {
-        if (typeof _gaq != "undefined" && _gaq != null) {
-          _gaq.push(['_trackPageview', '/remote/${ version }/' + path]);
+        if (typeof ga != "undefined" && ga != null) {
+          ga('send', 'pageview', {
+            'page': '/remote/${ version }/' + path
+          });
         }
       }
 

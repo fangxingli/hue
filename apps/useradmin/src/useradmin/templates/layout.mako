@@ -13,11 +13,9 @@
 ## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ## See the License for the specific language governing permissions and
 ## limitations under the License.
-##
-##
-## no spaces in this method please; we're declaring a CSS class, and ART uses this value for stuff, and it splits on spaces, and
-## multiple spaces and line breaks cause issues
+
 <%!
+from desktop import conf
 from django.utils.translation import ugettext as _
 
 def is_selected(section, matcher):
@@ -30,10 +28,13 @@ def is_selected(section, matcher):
 <%def name="render_field(field, show_label=True, extra_attrs={})">
   % if not field.is_hidden:
     <% group_class = field.errors and "error" or "" %>
-    <div class="control-group ${group_class}"
-      rel="popover" data-original-title="${ field.label }" data-content="${ field.help_text }">
+    <div class="control-group ${group_class}" data-original-title="${ field.label }" data-content="${ field.help_text }">
       % if show_label:
-        <label class="control-label">${ field.label }</label>
+        <label class="control-label">${ field.label }
+          % if field.help_text:
+          <sup title="${ field.help_text }" data-rel="tooltip"><i class="fa fa-question"></i></sup>
+          % endif
+        </label>
       % endif
       <div class="controls">
         <% field.field.widget.attrs.update(extra_attrs) %>
@@ -61,8 +62,11 @@ def is_selected(section, matcher):
               </li>
               %if user.is_superuser:
               <li class="${is_selected(section, 'users')}"><a href="/useradmin/users">${_('Users')}</a></li>
-				      <li class="${is_selected(section, 'groups')}"><a href="/useradmin/groups">${_('Groups')}</a></li>
-				      <li class="${is_selected(section, 'permissions')}"><a href="/useradmin/permissions">${_('Permissions')}</a></li>
+              <li class="${is_selected(section, 'groups')}"><a href="/useradmin/groups">${_('Groups')}</a></li>
+              <li class="${is_selected(section, 'permissions')}"><a href="/useradmin/permissions">${_('Permissions')}</a></li>
+              %if conf.USE_DEFAULT_CONFIGURATION.get():
+              <li class="${is_selected(section, 'configurations')}"><a href="/useradmin/configurations">${_('Configurations')}</a></li>
+              %endif
               %endif
             </ul>
           </div>
@@ -92,6 +96,9 @@ def is_selected(section, matcher):
         if (shown == 0) {
           $(".datatables tfoot").show();
         }
+      });
+      $('[data-rel="tooltip"]').tooltip({
+        placement: 'right'
       });
     });
   </script>

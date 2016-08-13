@@ -23,9 +23,7 @@ from django.utils.translation import ugettext as _
 
 from desktop.lib.django_util import JsonResponse
 from desktop.lib.exceptions_renderable import PopupException
-from beeswax.api import autocomplete
 from hadoop.cluster import get_defaultfs
-from libsolr.api import SolrApi
 
 from libsentry.api2 import get_api
 from libsentry.sentry_site import get_sentry_server_admin_groups
@@ -44,6 +42,8 @@ def fetch_authorizables(request):
 
 
 def _fetch_hive_path(request):
+  from beeswax.api import autocomplete
+
   path = request.GET['path']
 
   database = None
@@ -69,6 +69,7 @@ def _fetch_hive_path(request):
 
 
 def _fetch_collections(request):
+  from libsolr.api import SolrApi
   from search.conf import SOLR_URL
 
   path = request.GET['path']
@@ -146,7 +147,7 @@ def _to_sentry_privilege(privilege):
       'component': privilege['component'],
       'serviceName': privilege['serverName'],
       'authorizables': [{'type': auth['type'], 'name': auth['name_']} for auth in privilege['authorizables']], # TODO URI {'type': 'URI', 'name': _massage_uri('/path')}
-      'action': privilege['action'],
+      'action': '*' if privilege['action'].upper() == 'ALL' else privilege['action'],
       'createTime': privilege['timestamp'],
       'grantorPrincipal': privilege['grantorPrincipal'],
       'grantOption': 1 if privilege['grantOption'] else 0,
@@ -275,10 +276,10 @@ def save_privileges(request):
 
     modified_privileges = [privilege for privilege in role['privilegesChanged'] if privilege['status'] == 'modified']
     old_privileges_ids = [privilege['id'] for privilege in modified_privileges]
-    _hive_add_privileges(request.user, role, modified_privileges, component)
     for privilege in role['originalPrivileges']:
       if privilege['id'] in old_privileges_ids:
         _drop_sentry_privilege(request.user, role, privilege, component)
+    _hive_add_privileges(request.user, role, modified_privileges, component) # After REVOKES as REVOKE ALL removes everything.
 
     result['message'] = _('Privileges updated')
     result['status'] = 0
@@ -351,12 +352,13 @@ def list_sentry_privileges_by_authorizable(request):
 
   try:
     groups = [request.POST['groupName']] if request.POST['groupName'] else None
+    serviceName = request.POST['server']
     authorizableSet = [json.loads(request.POST['authorizableHierarchy'])]
     component = request.POST['component']
 
     _privileges = []
 
-    for authorizable, roles in get_api(request.user, component).list_sentry_privileges_by_authorizable(authorizableSet=authorizableSet, groups=groups):
+    for authorizable, roles in get_api(request.user, component).list_sentry_privileges_by_authorizable(serviceName=serviceName, authorizableSet=authorizableSet, groups=groups):
       for role, privileges in roles.iteritems():
         for privilege in privileges:
           privilege['roleName'] = role

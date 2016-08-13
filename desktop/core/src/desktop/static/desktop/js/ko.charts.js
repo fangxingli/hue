@@ -170,7 +170,22 @@
           _chart.multibar.stacked(typeof _options.stacked != "undefined" ? _options.stacked : false);
         }
 
-        window.setTimeout(function () {
+        var _isDiscrete = false;
+        for (var j = 0; j < _datum.length; j++) {
+          for (var i = 0; i < _datum[j].values.length; i++) {
+            if (isNaN(_datum[j].values[i].x * 1)) {
+              _isDiscrete = true;
+              break;
+            }
+          }
+        }
+
+        if ((_isDiscrete && $(element).data('chart_type') !== 'discrete_bar') || (!_isDiscrete && $(element).data('chart_type') === 'discrete_bar')){
+          ko.bindingHandlers.barChart.init(element, valueAccessor);
+        }
+        else {
+
+          window.setTimeout(function () {
           var _d3 = d3.select($(element).find("svg")[0]);
           _d3.datum(_datum)
             .transition().duration(150)
@@ -214,6 +229,8 @@
           }
           chartsNormalState();
         }, 0);
+
+        }
       }
       else if (_datum.length > 0) {
         ko.bindingHandlers.barChart.init(element, valueAccessor);
@@ -309,6 +326,14 @@
       if (_chart) {
         window.setTimeout(function () {
           var _d3 = d3.select($(element).find("svg")[0]);
+          if (_datum.length > 0 && _datum[0].values.length > 0 && typeof _datum[0].values[0].x.isValid === 'function'){
+            _chart.xAxis.tickFormat(function(d) { return d3.time.format("%Y-%m-%d %H:%M:%S")(new Date(d)); })
+            _chart.onChartUpdate(function () {
+              _d3.selectAll("g.nv-x.nv-axis g text").each(function (d){
+                insertLinebreaks(d, this);
+              });
+            });
+          }
           _d3.datum(_datum)
             .transition().duration(150)
             .each("end", function () {
@@ -397,7 +422,7 @@
                 attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
               }
               if (LeafletGlobals) {
-                tileLayerOptions = LeafletGlobals
+                tileLayerOptions = LeafletGlobals;
               }
               L.tileLayer(tileLayerOptions.layer, {
                 attribution: $(element).width() > 300 ? tileLayerOptions.attribution : ''
@@ -477,14 +502,16 @@
               }
             });
 
-            _map.addLayer(_clusterGroup);
-            if (! $("#command" + $(element).parents(".card-widget").attr("id")).is(":checked")) {
-              _map.fitBounds(_clusterGroup.getBounds());
-            }
+            window.setTimeout(function(){
+              _map.addLayer(_clusterGroup);
+              if (! $("#command" + $(element).parents(".card-widget").attr("id")).is(":checked")) {
+                _map.fitBounds(_clusterGroup.getBounds());
+              }
+              if (_options.onComplete != null) {
+                _options.onComplete();
+              }
+            }, 0);
 
-            if (_options.onComplete != null) {
-              _options.onComplete();
-            }
           }
           catch (err) {
             $.jHueNotify.error(err.message);
@@ -624,6 +651,9 @@
             if (_scope != "world" && _scope != "usa" && _scope != "europe" && _place.indexOf(".") == -1) {
               _place = HueGeo.getISOAlpha2(_scope) + "." + _place;
             }
+            if ((_scope == "world" || _scope == "europe") && _place.length == 2) {
+              _place = HueGeo.getISOAlpha3(_place);
+            }
             _mapdata[_place] = {
               fillKey: "fill_" + (_is2d ? getHighestCategoryValue(cnt, item).idx : (Math.ceil(item.value / _chunk) - 1)),
               id: _place,
@@ -648,6 +678,9 @@
           if (_place != null) {
             if (_scope != "world" && _scope != "usa" && _scope != "europe" && _place.indexOf(".") == -1) {
               _place = HueGeo.getISOAlpha2(_scope) + "." + _place;
+            }
+            if ((_scope == "world" || _scope == "europe") && _place.length == 2) {
+              _place = HueGeo.getISOAlpha3(_place);
             }
             _mapdata[_place] = {
               fillKey: "selected",
@@ -769,9 +802,9 @@
 
   ko.bindingHandlers.scatterChart = {
     update: function (element, valueAccessor) {
+      var options = valueAccessor();
+      var _datum = options.transformer(options.datum);
       window.setTimeout(function () {
-        var options = valueAccessor();
-        var _datum = options.transformer(options.datum);
         $(element).height(300);
         if ($(element).find("svg").length > 0 && (_datum.length == 0 || _datum[0].values.length == 0)) {
           $(element).find("svg").empty();
@@ -851,7 +884,11 @@
         var _chart = nv.models.lineWithBrushChart();
         $(element).data("chart", _chart);
         _chart.transitionDuration(0);
-        if (_datum.length > 0 && _datum[0].values.length > 10) {
+        var enableSelection = true;
+        if (typeof options.enableSelection !== 'undefined') {
+          enableSelection = options.enableSelection;
+        }
+        if (_datum.length > 0 && _datum[0].values.length > 10 && enableSelection) {
           _chart.enableSelection();
         }
         if (options.showControls != null) {
@@ -938,6 +975,7 @@
             $(element).find("svg").empty();
           }
           _chart = nv.models.multiBarWithBrushChart();
+          $(element).data('chart_type', 'multibar_brush');
           if (_datum.length > 0 && _datum[0].values.length > 10) {
             _chart.enableSelection();
           }
@@ -945,6 +983,7 @@
             chartsUpdatingState();
             options.onSelectRange(from, to);
           });
+          _chart.staggerLabels(true);
           _chart.xAxis.tickFormat(d3.time.format("%Y-%m-%d %H:%M:%S"));
           _chart.multibar.hideable(true);
           _chart.multibar.stacked(typeof options.stacked != "undefined" ? options.stacked : false);
@@ -969,6 +1008,7 @@
             if ($(element).find("svg").length > 0 && $(element).find(".nv-multiBarWithLegend").length > 0) {
               $(element).find("svg").empty();
             }
+            $(element).data('chart_type', 'discrete_bar');
             _chart = nv.models.growingDiscreteBarChart()
                 .x(function (d) {
                   return d.x
@@ -985,6 +1025,7 @@
             if ($(element).find("svg").length > 0 && $(element).find(".nv-discreteBarWithAxes").length > 0) {
               $(element).find("svg").empty();
             }
+            $(element).data('chart_type', 'multibar_brush');
             _chart = nv.models.multiBarWithBrushChart();
             _chart.tooltipContent(function (key, x, y) {
               return '<h3>' + hueUtils.htmlEncode(key) + '</h3><p>' + y + ' on ' + hueUtils.htmlEncode(x) + '</p>'
@@ -999,6 +1040,7 @@
             else {
               _chart.xAxis.showMaxMin(false).tickFormat(d3.format(",0f"));
             }
+            _chart.staggerLabels(true);
             _chart.multibar.hideable(true);
             _chart.multibar.stacked(typeof options.stacked != "undefined" ? options.stacked : false);
             _chart.onStateChange(options.onStateChange);
@@ -1014,7 +1056,7 @@
         _chart.transitionDuration(0);
 
         _chart.yAxis
-            .tickFormat(d3.format(",0f"));
+            .tickFormat(d3.format("s"));
 
         $(element).data("chart", _chart);
 
@@ -1556,6 +1598,8 @@
     return tip
   };
 
-  d3.tip = tipBuilder;
+  if (typeof d3 !== 'undefined') {
+    d3.tip = tipBuilder;
+  }
 
 }));

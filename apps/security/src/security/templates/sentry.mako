@@ -57,25 +57,26 @@ ${ layout.menubar(section=component) }
 
     <!-- ko if: $root.component() == 'hive' -->
       <div class="inline-block" style="vertical-align: middle">
-        <a class="pointer" style="padding-top: 4px" data-bind="click: function(){ privilegeType('db'); action($root.availableActions()[0]) }">
-          <i class="fa fa-fw fa-1halfx muted" data-bind="css: {'fa-circle-o': privilegeType() != 'db', 'fa-check-circle-o': privilegeType() == 'db'}"></i>
+        <a class="pointer" style="padding-top: 4px" data-bind="click: function(){ privilegeType('DATABASE'); action($root.availableActions()[0]) }">
+          <i class="fa fa-fw fa-1halfx muted" data-bind="css: {'fa-circle-o': privilegeType() != 'DATABASE', 'fa-check-circle-o': privilegeType() == 'DATABASE'}"></i>
         </a>
       </div>
-      <input type="text" data-bind="hivechooser: $data.path, enable: privilegeType() == 'db'" placeholder="dbName.tableName <CTRL+SPACE>">
+      <input type="text" data-bind="hivechooser: $data.path, enable: privilegeType() == 'DATABASE'" placeholder="dbName.tableName <CTRL+SPACE>">
 
       <div class="inline-block" style="vertical-align: middle">
-        <a class="pointer" style="padding-top: 4px" data-bind="click: function(){ privilegeType('uri'); action('ALL'); }">
-          <i class="fa fa-fw fa-1halfx muted" data-bind="css: {'fa-circle-o': privilegeType() != 'uri', 'fa-check-circle-o': privilegeType() == 'uri'}"></i>
+        <a class="pointer" style="padding-top: 4px" data-bind="click: function(){ privilegeType('URI'); action('ALL'); }">
+          <i class="fa fa-fw fa-1halfx muted" data-bind="css: {'fa-circle-o': privilegeType() != 'URI', 'fa-check-circle-o': privilegeType() == 'URI'}"></i>
         </a>
       </div>
 
-      <input type="text" data-bind="filechooser: 'URI TODO', enable: privilegeType() == 'uri'" placeholder="URI">
+      <input type="text" data-bind="filechooser: 'URI TODO', enable: privilegeType() == 'URI'" placeholder="URI">
 
-      <select data-bind="options: $root.availableActions, value: $data.action, enable: (privilegeType() == 'db')" style="width: 100px; margin-bottom: 0"></select>
+      <select data-bind="options: $root.availableActions, value: $data.action, enable: (privilegeType() == 'DATABASE')" style="width: 100px; margin-bottom: 0"></select>
     <!-- /ko -->
+
     <!-- ko if: $root.component() == 'solr' -->
-      <input type="text" class="input-xxlarge" data-bind="solrchooser: $data.path, enable: privilegeType() == 'db'" placeholder="collection name <CTRL+SPACE>">
-      <select data-bind="options: $root.availableActions, value: $data.action, enable: (privilegeType() == 'db')" style="width: 100px; margin-bottom: 0"></select>
+      <input type="text" class="input-xxlarge" data-bind="solrchooser: $data.path" placeholder="collection or config name <CTRL+SPACE>">
+      <select data-bind="options: privilegeType() == 'CONFIG' ? $root.availableSolrConfigActions : $root.availableActions, value: $data.action, enable: (privilegeType() == 'COLLECTION')" style="width: 100px; margin-bottom: 0"></select>
     <!-- /ko -->
 
     <div class="new-line-if-small">
@@ -103,21 +104,27 @@ ${ layout.menubar(section=component) }
     </div>
     <!-- /ko -->
 
-    <span class="muted" data-bind="text: privilegeScope, attr: {title: moment(timestamp()).fromNow()}"></span>
+    <span class="muted" data-bind="text: privilegeType, attr: {title: moment(timestamp()).fromNow()}"></span>
+    <!-- ko if: $root.component() == 'solr' && authorizables().length > 0 && authorizables()[0].type() == 'COLLECTION'  && authorizables()[0].name_() != '*' -->
+      <a data-bind="attr: { href: indexerPath() }" target="_blank" title="${ _('Open in Indexer') }" class="muted">
+        <i class="fa fa-external-link"></i>
+      </a>
+    <!-- /ko -->
 
     <!-- ko if: grantOption -->
       <i class="fa fa-unlock muted" title="${ _('With grant option') }"></i>
     <!-- /ko -->
 
     <!-- ko if: $root.component() == 'hive' -->
-      <span data-bind="visible: metastorePath() != '' && privilegeType() == 'db'">
+      <span data-bind="visible: metastorePath() != '' && privilegeType() == 'DATABASE'">
         <a data-bind="attr: { href: metastorePath() }" class="muted" target="_blank" style="margin-left: 4px" title="${ _('Open in Metastore') }"><i class="fa fa-external-link"></i></a>
       </span>
       <br/>
 
       server=<span data-bind="text: serverName"></span>
 
-      <!-- ko if: privilegeType() == 'db' -->
+      <!-- ko if: privilegeType() == 'DATABASE' -->
+        // TODO
         <span data-bind="visible: dbName">
           <i class="fa fa-long-arrow-right"></i> db=<a class="pointer" data-bind="click: function(){ $root.linkToBrowse(dbName()) }" title="${ _('Browse db privileges') }"><span data-bind="text: dbName"></span></a>
         </span>
@@ -129,7 +136,7 @@ ${ layout.menubar(section=component) }
         </span>
       <!-- /ko -->
 
-      <!-- ko if: privilegeType() == 'uri' -->
+      <!-- ko if: privilegeType() == 'URI' -->
         <i class="fa fa-long-arrow-right"></i> <i class="fa fa-file-o"></i> <i class="fa fa-long-arrow-right"></i> <a data-bind="attr: { href: '/filebrowser/view=/' + URI().split('/')[3] }" target="_blank"><span data-bind="text: URI"></span></a>
       <!-- /ko -->
 
@@ -142,7 +149,12 @@ ${ layout.menubar(section=component) }
           <!-- ko if: $index() > 0 -->
             <i class="fa fa-long-arrow-right"></i>
           <!-- /ko -->
-          <span data-bind="text: type"></span>=<span data-bind="text: name_"></span></span>
+          <!-- ko if: type() == 'COLLECTION' && name_() != '*' -->
+            <span data-bind="text: type"></span>=<a class="pointer" data-bind="click: function(){ $root.linkToBrowse('collections.' + name_()) }" title="${ _('Browse privileges') }"><span data-bind="text: name_"></span></a></span>
+          <!-- /ko -->
+          <!-- ko ifnot: type() == 'COLLECTION' && name_() != '*' -->
+            <span data-bind="text: type"></span>=<span data-bind="text: name_"></span></span>
+          <!-- /ko -->
         <!-- /ko -->
       <!-- /ko -->
     <!-- /ko -->
@@ -230,7 +242,7 @@ ${ layout.menubar(section=component) }
                         </li>
                       </ul>
                     </div>
-                    <select class="user-list" data-bind="options: $root.selectableHadoopUsers, select2: { placeholder: '${ _ko("Select a user") }', update: $root.doAs, type: 'user'}" style="width: 120px"></select>
+                    <select class="user-list" data-bind="options: $root.selectableHadoopUsers, select2: { dropdownAutoWidth: true, placeholder: '${ _ko("Select a user") }', update: $root.doAs, type: 'user'}" style="width: 120px"></select>
                     % endif
                   </div>
                   <div>
@@ -304,7 +316,7 @@ ${ layout.menubar(section=component) }
           <div data-bind="visible: $root.roles().length > 0 && ! $root.isLoadingRoles()">
             <%actionbar:render>
               <%def name="search()">
-                <input id="filterInput" type="text" class="input-xlarge search-query" placeholder="${_('Search roles by name, groups, etc...')}" data-bind="value: $root.roleFilter, valueUpdate: 'afterkeydown'">
+                <input id="filterInput" type="text" class="input-xlarge search-query" placeholder="${_('Search roles by name, groups, etc...')}" data-bind="clearable: $root.roleFilter, valueUpdate: 'afterkeydown'">
               </%def>
 
               <%def name="actions()">
@@ -355,22 +367,22 @@ ${ layout.menubar(section=component) }
                       <i class="fa fa-plus"></i> ${ _('Add a group') }
                     </span>
                   </a>
+                  <div data-bind="visible: showEditGroups() || (groupsChanged() && ! $root.isLoadingRoles())">
+                    <select data-bind="options: $root.selectableHadoopGroups, selectedOptions: groups, select2: { dropdownAutoWidth: true, update: groups, type: 'group', onBlur: function(){ showEditGroups(false); } }" size="5" multiple="true" style="width: 400px"></select>
+                    &nbsp;
+                    <a class="pointer" data-bind="visible: groupsChanged() && !$root.isLoadingRoles(), click: resetGroups">
+                      <i class="fa fa-undo"></i>
+                    </a>
+                    <a class="pointer" data-bind="visible: groupsChanged() && !$root.isLoadingRoles(), click: saveGroups">
+                      <i class="fa fa-save"></i>
+                    </a>
+                  </div>
                   <!-- /ko -->
                   <!-- ko ifnot: $root.is_sentry_admin -->
                     <span data-bind="foreach: groups">
                       <span data-bind="text: $data"></span>
                     </span>
                   <!-- /ko -->
-                  <div data-bind="visible: showEditGroups() || (groupsChanged() && ! $root.isLoadingRoles())">
-                    <select data-bind="options: $root.selectableHadoopGroups, selectedOptions: groups, select2: { update: groups, type: 'group', onBlur: function(){ showEditGroups(false); } }" size="5" multiple="true" style="width: 400px"></select>
-                    &nbsp;
-                    <a class="pointer" data-bind="visible: groupsChanged() && ! $root.isLoadingRoles(), click: resetGroups">
-                      <i class="fa fa-undo"></i>
-                    </a>
-                    <a class="pointer" data-bind="visible: groupsChanged && ! $root.isLoadingRoles(), click: saveGroups">
-                      <i class="fa fa-save"></i>
-                    </a>
-                  </div>
                 </td>
                 <td>
                 </td>
@@ -388,7 +400,7 @@ ${ layout.menubar(section=component) }
                   <div class="acl-block acl-actions" data-bind="click: privilegesChanged().length == 0 ? addPrivilege : void(0), visible: $root.is_sentry_admin">
                     <span class="pointer" data-bind="click: addPrivilege, visible: $data.showPrivileges" title="${ _('Add privilege') }"><i class="fa fa-plus"></i></span>
                     <span class="pointer" data-bind="click: $root.list_sentry_privileges_by_role, visible: privilegesChanged().length > 0" title="${ _('Undo') }"> &nbsp; <i class="fa fa-undo"></i></span>
-                    <span class="pointer" data-bind="click: function() { deletePrivilegeModal($data) }, visible: privilegesChanged().length > 0" title="${ _('Save') }"> &nbsp; <i class="fa fa-save"></i></span>
+                    <span class="pointer" data-bind="click: function() { deletePrivilegeModal($data) }, visible: privilegesChanged().length > 0 && isValid()" title="${ _('Save') }"> &nbsp; <i class="fa fa-save"></i></span>
                   </div>
                 </td>
               </tr>
@@ -398,6 +410,7 @@ ${ layout.menubar(section=component) }
       </div>
 
     </div> <!-- /span10 -->
+  </div>
 </div>
 
 
@@ -418,7 +431,7 @@ ${ layout.menubar(section=component) }
       </div>
       <div class="span6">
         <h4>${ _('Groups') }</h4>
-        <select data-bind="options: $root.selectableHadoopGroups, selectedOptions: groups, select2: { update: groups, type: 'group', placeholder: '${ _ko("Optional") }' }" size="5" multiple="true" style="width: 360px"></select>
+        <select data-bind="options: $root.selectableHadoopGroups, selectedOptions: groups, select2: { dropdownAutoWidth: true, update: groups, type: 'group', placeholder: '${ _ko("Optional") }' }" size="5" multiple="true" style="width: 360px"></select>
       </div>
     </div>
 
@@ -430,8 +443,8 @@ ${ layout.menubar(section=component) }
   </div>
   <div class="modal-footer">
     <button class="btn" data-dismiss="modal" aria-hidden="true">${ _('Cancel') }</button>
-    <button data-loading-text="${ _('Saving...') }" class="btn btn-primary disable-enter" data-bind="click: $root.role().create, visible: ! $root.role().isEditing()">${ _('Save') }</button>
-    <button data-loading-text="${ _('Saving...') }" class="btn btn-primary disable-enter" data-bind="click: $root.role().update, visible: $root.role().isEditing()">${ _('Update') }</button>
+    <button data-loading-text="${ _('Saving...') }" class="btn btn-primary disable-enter" data-bind="click: $root.role().create, visible: ! $root.role().isEditing(), css: {'disabled': !$root.role().isValid()}">${ _('Save') }</button>
+    <button data-loading-text="${ _('Saving...') }" class="btn btn-primary disable-enter" data-bind="click: $root.role().update, visible: $root.role().isEditing(), css: {'disabled': !$root.role().isValid()}">${ _('Update') }</button>
   </div>
 </div>
 
@@ -449,7 +462,7 @@ ${ layout.menubar(section=component) }
 
     <br/>
     <span>${ _('To role') }&nbsp;&nbsp;</span>
-    <select data-bind="options: $root.selectableRoles(), value: $root.grantToPrivilegeRole, select2: { update: $root.grantToPrivilegeRole, placeholder: '${ _ko("Select a role") }', type: 'role' }" style="width: 360px"></select>
+    <select data-bind="options: $root.selectableRoles(), value: $root.grantToPrivilegeRole, select2: { dropdownAutoWidth: true, update: $root.grantToPrivilegeRole, placeholder: '${ _ko("Select a role") }', type: 'role' }" style="width: 360px"></select>
     <br/>
 
   </div>
@@ -596,7 +609,6 @@ ${ tree.import_templates(itemClick='$root.assist.setPath', iconClick='$root.assi
 <script src="${ static('desktop/js/ko.hue-bindings.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('security/js/sentry.ko.js') }" type="text/javascript" charset="utf-8"></script>
 
-<script src="${ static('desktop/ext/js/moment-with-locales.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/jquery.hiveautocomplete.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/jquery.filechooser.js') }" type="text/javascript" charset="utf-8"></script>
 
@@ -605,7 +617,7 @@ ${ tree.import_templates(itemClick='$root.assist.setPath', iconClick='$root.assi
 
     function deletePrivilegeModal(role) {
       var cascadeDeletes = $.grep(role.privilegesChanged(), function(privilege) {
-          return privilege.status() == 'deleted' && (privilege.privilegeScope() == 'SERVER' || privilege.privilegeScope() == 'DATABASE'); }
+        return privilege.status() == 'deleted' && (privilege.privilegeType() == 'SERVER' || privilege.privilegeType() == 'DATABASE'); }
       );
       if (cascadeDeletes.length > 0 ) {
         viewModel.roleToUpdate(role);
@@ -746,12 +758,16 @@ ${ tree.import_templates(itemClick='$root.assist.setPath', iconClick='$root.assi
         show: false
       });
 
-      $("#createRoleModal").on("hidden", function () {
+      $("#createRoleModal").on("show", function () {
+        $(document).trigger("create.typeahead");
+      });
+
+      $("#createRoleModal").on("hide", function () {
         $('#jHueGenericAutocomplete').hide();
         viewModel.resetCreateRole();
       });
 
-      $("#grantPrivilegeModal").on("hidden", function () {
+      $("#grantPrivilegeModal").on("hide", function () {
         viewModel.clearTempRoles();
       });
 
@@ -789,21 +805,27 @@ ${ tree.import_templates(itemClick='$root.assist.setPath', iconClick='$root.assi
         viewModel.isApplyingBulk(false);
       });
 
-      $(document).on("create.typeahead", function(){
+      $(document).on("create.typeahead", function () {
         $("#createRoleName").typeahead({
-            source: function (query) {
-              var _options = [];
-              viewModel.selectableRoles().forEach(function(item){
-                if (item.toLowerCase().indexOf(query.toLowerCase()) > -1){
-                  _options.push(item);
-                }
-              });
-              return _options;
-            },
-            'updater': function(item) {
-                return item;
-            }
+          source: function (query) {
+            var _options = [];
+            viewModel.selectableRoles().forEach(function (item) {
+              if (item.toLowerCase().indexOf(query.toLowerCase()) > -1) {
+                _options.push(item);
+              }
+            });
+            return _options;
+          },
+          minLength: 0,
+          'updater': function (item) {
+            return item;
+          }
         });
+      });
+      $(document).on('focus', '#createRoleName', function () {
+        if ($("#createRoleName").data('typeahead')){
+          $("#createRoleName").data('typeahead').lookup();
+        }
       });
       $(document).on("destroy.typeahead", function(){
         $('.typeahead').unbind();

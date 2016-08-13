@@ -244,6 +244,16 @@ ace:
 
 
 ###################################
+# JISON Parser Generator
+###################################
+
+# <<<< DEV ONLY
+.PHONY: jison
+jison:
+	@cd tools/jison && ./hue-jison.sh
+# END DEV ONLY >>>>
+
+###################################
 # Cleanup
 ###################################
 
@@ -277,6 +287,9 @@ ext-clean:
 ###############################################
 # Misc (some used by automated test scripts)
 ###############################################
+
+js-test:
+	$(ROOT)/tools/jasmine/phantomjs.runner.sh $(ROOT)/desktop/core/src/desktop/templates/jasmineRunner.html
 
 java-test:
 	mvn -f desktop/libs/hadoop/java/pom.xml test $(MAVEN_OPTIONS)

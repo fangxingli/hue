@@ -20,6 +20,7 @@ from django.utils.translation import ugettext_lazy as _t
 from desktop.conf import AUTH_USERNAME as DEFAULT_AUTH_USERNAME, AUTH_PASSWORD as DEFAULT_AUTH_PASSWORD, \
                          AUTH_PASSWORD_SCRIPT, default_ssl_validate
 from desktop.lib.conf import Config, ConfigSection, coerce_bool, coerce_password_from_script
+from desktop.lib.paths import get_config_root
 
 
 def get_auth_username():
@@ -34,8 +35,28 @@ def get_auth_password():
     return password
   return DEFAULT_AUTH_PASSWORD.get()
 
+def default_navigator_config_dir():
+  """Get from usual main Hue config directory"""
+  return get_config_root()
+
+
+def default_navigator_url():
+  """Get from usual main Hue config directory"""
+  from metadata.metadata_sites import get_navigator_server_url
+  return get_navigator_server_url() + '/api'
+
+
 def get_optimizer_url():
   return OPTIMIZER.API_URL.get() and OPTIMIZER.API_URL.get().strip('/')
+
+def has_optimizer():
+  return bool(get_optimizer_url())
+
+def get_navigator_url():
+  return NAVIGATOR.API_URL.get() and NAVIGATOR.API_URL.get().strip('/')[:-3]
+
+def has_navigator():
+  return bool(get_navigator_url() and NAVIGATOR.AUTH_PASSWORD.get())
 
 
 OPTIMIZER = ConfigSection(
@@ -97,6 +118,13 @@ OPTIMIZER = ConfigSection(
       help=_t("In secure mode (HTTPS), if Optimizer SSL certificates have to be verified against certificate authority"),
       dynamic_default=default_ssl_validate,
       type=coerce_bool
+    ),
+
+    MOCKING = Config(
+      key="mocking",
+      help=_t("Use mock data"),
+      default=False,
+      type=coerce_bool
     )
   )
 )
@@ -108,12 +136,11 @@ NAVIGATOR = ConfigSection(
   members=dict(
     API_URL=Config(
       key='api_url',
-      help=_t('Base URL to Navigator API (e.g. - http://localhost:7187/api/v2)'),
-      default=None),
+      help=_t('Base URL to Navigator API.'),
+      dynamic_default=default_navigator_url),
     AUTH_USERNAME=Config(
       key="auth_username",
       help=_t("Auth username of the hue user used for authentications."),
-      private=True,
       dynamic_default=get_auth_username),
     AUTH_PASSWORD=Config(
       key="auth_password",
@@ -126,5 +153,10 @@ NAVIGATOR = ConfigSection(
       private=True,
       type=coerce_password_from_script,
       default=None),
+    CONF_DIR = Config(
+      key='conf_dir',
+      help=_t('Navigator configuration directory, where navigator.client.properties is located.'),
+      dynamic_default=default_navigator_config_dir
+    )
   )
 )

@@ -119,6 +119,9 @@ class ProxyFS(object):
   def isroot(self, path):
     return self._get_fs(path).isroot(path)
 
+  def parent_path(self, path):
+    return self._get_fs(path).parent_path(path)
+
   def join(self, first, *comp_list):
     return self._get_fs(first).join(first, *comp_list)
 
@@ -162,7 +165,7 @@ class ProxyFS(object):
     return fs.mktemp(subdir=subdir, prefix=prefix, basedir=basedir)
 
   def purge_trash(self):
-    for fs in self.fs_set:
+    for fs in self._fs_set:
       if hasattr(fs, 'purge_trash'):
         fs.purge_trash()
 
@@ -207,3 +210,6 @@ class ProxyFS(object):
 
   def _rename_star_between_filesystems(self, old, new):
     raise NotImplementedError("Will be addressed in HUE-2934")
+
+  def upload(self, file, path, *args, **kwargs):
+    self._get_fs(path).upload(file, path, *args, **kwargs)

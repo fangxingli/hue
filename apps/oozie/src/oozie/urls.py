@@ -81,6 +81,7 @@ urlpatterns += patterns(
   url(r'^editor/workflow/add_node/$', 'add_node', name='add_node'),
   url(r'^editor/workflow/parameters/$', 'workflow_parameters', name='workflow_parameters'),
   url(r'^editor/workflow/action/parameters/$', 'action_parameters', name='action_parameters'),
+  url(r'^editor/workflow/action/refresh_parameters/$', 'refresh_action_parameters', name='refresh_action_parameters'),
   url(r'^editor/workflow/gen_xml/$', 'gen_xml_workflow', name='gen_xml_workflow'),
   url(r'^editor/workflow/open_v1/$', 'open_old_workflow', name='open_old_workflow'),
   
@@ -90,7 +91,7 @@ urlpatterns += patterns(
   url(r'^editor/coordinator/delete/$', 'delete_job', name='delete_editor_coordinator'),
   url(r'^editor/coordinator/copy/$', 'copy_coordinator', name='copy_coordinator'),
   url(r'^editor/coordinator/save/$', 'save_coordinator', name='save_coordinator'),
-  url(r'^editor/coordinator/submit/(?P<doc_id>\d+)$', 'submit_coordinator', name='editor_submit_coordinator'),
+  url(r'^editor/coordinator/submit/(?P<doc_id>[-\w]+)$', 'submit_coordinator', name='editor_submit_coordinator'),
   url(r'^editor/coordinator/gen_xml/$', 'gen_xml_coordinator', name='gen_xml_coordinator'),
   url(r'^editor/coordinator/open_v1/$', 'open_old_coordinator', name='open_old_coordinator'),
   url(r'^editor/coordinator/parameters/$', 'coordinator_parameters', name='coordinator_parameters'),
@@ -144,4 +145,9 @@ urlpatterns += patterns(
   url(r'^list_oozie_info/$', 'list_oozie_info', name='list_oozie_info'),
 
   url(r'^list_oozie_sla/$', 'list_oozie_sla', name='list_oozie_sla'),
+)
+
+urlpatterns += patterns(
+  'oozie.views.common',
+  url(r'^jasmine', 'jasmine', name='jasmine'),
 )

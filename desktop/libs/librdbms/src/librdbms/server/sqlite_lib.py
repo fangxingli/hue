@@ -106,3 +106,8 @@ class SQLiteClient(BaseRDMSClient):
     else:
       columns = [dict(name=row[1], type=row[2], comment='') for row in cursor.fetchall()]
     return columns
+
+  def get_sample_data(self, database, table, column=None, limit=100):
+    column = '`%s`' % column if column else '*'
+    statement = 'SELECT %s FROM `%s` LIMIT %d' % (column, table, limit)
+    return self.execute_statement(statement)

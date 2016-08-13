@@ -34,11 +34,11 @@ desktop.lib.metrics.file_reporter.start_file_reporter()
 
 from django.conf import settings
 from django.conf.urls import include, patterns
-from django.conf.urls.static import static
 from django.contrib import admin
 
 from desktop import appmanager
 from desktop.conf import METRICS, USE_NEW_EDITOR
+
 
 # Django expects handler404 and handler500 to be defined.
 # django.conf.urls provides them. But we want to override them.
@@ -75,11 +75,15 @@ dynamic_patterns += patterns('desktop.views',
   (r'^logs$','log_view'),
   (r'^desktop/dump_config$','dump_config'),
   (r'^desktop/download_logs$','download_log_view'),
+  (r'^desktop/get_debug_level','get_debug_level'),
+  (r'^desktop/set_all_debug','set_all_debug'),
+  (r'^desktop/reset_all_debug','reset_all_debug'),
   (r'^bootstrap.js$', 'bootstrap'), # unused
 
   (r'^desktop/prefs/(?P<key>\w+)?$', 'prefs'),
   (r'^desktop/status_bar/?$', 'status_bar'),
   (r'^desktop/debug/is_alive$','is_alive'),
+  (r'^desktop/debug/is_idle$','is_idle'),
   (r'^desktop/debug/threads$', 'threads'),
   (r'^desktop/debug/memory$', 'memory'),
   (r'^desktop/debug/check_config$', 'check_config'),
@@ -109,6 +113,7 @@ dynamic_patterns += patterns('desktop.api',
 )
 
 dynamic_patterns += patterns('desktop.api2',
+  (r'^desktop/api2/doc/open?$', 'open_document'),  # To keep before get_document
   (r'^desktop/api2/docs/?$', 'search_documents'),  # search documents for current user
   (r'^desktop/api2/doc/?$', 'get_document'),  # get doc/dir by path or UUID
 
@@ -120,6 +125,13 @@ dynamic_patterns += patterns('desktop.api2',
 
   (r'^desktop/api2/doc/export/?$', 'export_documents'),
   (r'^desktop/api2/doc/import/?$', 'import_documents'),
+)
+
+# Default Configurations
+dynamic_patterns += patterns('desktop.configuration.api',
+  (r'^desktop/api/configurations/?$', 'default_configurations'),
+  (r'^desktop/api/configurations/user/?$', 'app_configuration_for_user'),
+  (r'^desktop/api/configurations/delete/?$', 'delete_default_configuration'),
 )
 
 dynamic_patterns += patterns('useradmin.views',

@@ -15,11 +15,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import re
-import time
 import logging
+import re
 import string
+import time
+import urllib2
 import urlparse
 
 from urllib import quote_plus
@@ -43,16 +43,22 @@ from hadoop.api.jobtracker.ttypes import ThriftJobPriority, TaskTrackerNotFoundE
 from hadoop.yarn.clients import get_log_client
 import hadoop.yarn.resource_manager_api as resource_manager_api
 
-from jobbrowser.conf import SHARE_JOBS
-from jobbrowser.conf import DISABLE_KILLING_JOBS
+LOG = logging.getLogger(__name__)
+
+
+try:
+  from beeswax.hive_site import hiveserver2_impersonation_enabled
+except:
+  LOG.warn('Hive is not enabled')
+  def hiveserver2_impersonation_enabled(): return True
+
+from jobbrowser.conf import LOG_OFFSET, SHARE_JOBS
 from jobbrowser.api import get_api, ApplicationNotRunning, JobExpired
 from jobbrowser.models import Job, JobLinkage, Tracker, Cluster, can_view_job, can_modify_job, LinkJobLogs, can_kill_job
 from jobbrowser.yarn_models import Application
 
-import urllib2
 
-
-LOGGER = logging.getLogger(__name__)
+LOG_OFFSET_BYTES = LOG_OFFSET.get()
 
 
 def check_job_permission(view_func):
@@ -75,7 +81,7 @@ def check_job_permission(view_func):
       raise PopupException(_('Job %s has expired.') % jobid, detail=_('Cannot be found on the History Server.'))
     except Exception, e:
       msg = 'Could not find job %s.'
-      LOGGER.exception(msg % jobid)
+      LOG.exception(msg % jobid)
       raise PopupException(_(msg) % jobid, detail=e)
 
     if not SHARE_JOBS.get() and not request.user.is_superuser \
@@ -104,15 +110,15 @@ def job_not_assigned(request, jobid, path):
 
 
 def jobs(request):
-  user = request.GET.get('user', request.user.username)
-  state = request.GET.get('state')
-  text = request.GET.get('text')
-  retired = request.GET.get('retired')
+  user = request.POST.get('user', request.user.username)
+  state = request.POST.get('state')
+  text = request.POST.get('text')
+  retired = request.POST.get('retired')
 
-  if request.GET.get('format') == 'json':
+  if request.POST.get('format') == 'json':
     try:
       # Limit number of jobs to be 10,000
-      jobs = get_api(request.user, request.jt).get_jobs(user=request.user, username=user, state=state, text=text, retired=retired, limit=10000)
+      jobs = get_api(request.user, request.jt).get_jobs(user=request.user, username=user, state=state, text=text, retired=retired, limit=1000)
     except Exception, ex:
       ex_message = str(ex)
       if 'Connection refused' in ex_message or 'standby RM' in ex_message:
@@ -120,7 +126,7 @@ def jobs(request):
       elif 'Could not connect to' in ex_message:
         raise PopupException(_('Job Tracker cannot be contacted or might be down.'))
       else:
-        raise ex
+        raise PopupException(ex)
     json_jobs = {
       'jobs': [massage_job_for_json(job, request) for job in jobs],
     }
@@ -133,7 +139,8 @@ def jobs(request):
     'text_filter': text,
     'retired': retired,
     'filtered': not (state == 'all' and user == '' and text == ''),
-    'is_yarn': cluster.is_yarn()
+    'is_yarn': cluster.is_yarn(),
+    'hiveserver2_impersonation_enabled': hiveserver2_impersonation_enabled()
   })
 
 def massage_job_for_json(job, request):
@@ -247,71 +254,95 @@ def kill_job(request, job):
   try:
     job.kill()
   except Exception, e:
-    LOGGER.exception('Killing job')
+    LOG.exception('Killing job')
     raise PopupException(e)
 
   cur_time = time.time()
   api = get_api(request.user, request.jt)
 
   while time.time() - cur_time < 15:
-    job = api.get_job(jobid=job.jobId)
-
-    if job.status not in ["RUNNING", "QUEUED"]:
-      if request.REQUEST.get("next"):
-        return HttpResponseRedirect(request.REQUEST.get("next"))
-      elif request.REQUEST.get("format") == "json":
-        return JsonResponse({'status': 0}, encoder=JSONEncoderForHTML)
-      else:
-        raise MessageException("Job Killed")
+    try:
+      job = api.get_job(jobid=job.jobId)
+    except Exception, e:
+      LOG.warn('Failed to get job with ID %s: %s' % (job.jobId, e))
+    else:
+      if job.status not in ["RUNNING", "QUEUED"]:
+        if request.REQUEST.get("next"):
+          return HttpResponseRedirect(request.REQUEST.get("next"))
+        elif request.REQUEST.get("format") == "json":
+          return JsonResponse({'status': 0}, encoder=JSONEncoderForHTML)
+        else:
+          raise MessageException("Job Killed")
     time.sleep(1)
 
   raise Exception(_("Job did not appear as killed within 15 seconds."))
+
 
 @check_job_permission
 def job_attempt_logs(request, job, attempt_index=0):
   return render("job_attempt_logs.mako", request, {
     "attempt_index": attempt_index,
     "job": job,
+    "log_offset": LOG_OFFSET_BYTES
   })
 
 
 @check_job_permission
-def job_attempt_logs_json(request, job, attempt_index=0, name='syslog', offset=0):
+def job_attempt_logs_json(request, job, attempt_index=0, name='syslog', offset=LOG_OFFSET_BYTES):
   """For async log retrieval as Yarn servers are very slow"""
+  log_link = None
+  response = {'status': -1}
 
   try:
-    attempt_index = int(attempt_index)
-    attempt = job.job_attempts['jobAttempt'][attempt_index]
-    log_link = attempt['logsLink']
+    jt = get_api(request.user, request.jt)
+    app = jt.get_application(job.jobId)
+
+    if app['applicationType'] == 'MAPREDUCE':
+      if app['finalStatus'] in ('SUCCEEDED', 'FAILED', 'KILLED'):
+        attempt_index = int(attempt_index)
+        attempt = job.job_attempts['jobAttempt'][attempt_index]
+
+        log_link = attempt['logsLink']
+        # Reformat log link to use YARN RM, replace node addr with node ID addr
+        log_link = log_link.replace(attempt['nodeHttpAddress'], attempt['nodeId'])
+      elif app['state'] == 'RUNNING':
+        log_link = app['amContainerLogs']
   except (KeyError, RestException), e:
     raise KeyError(_("Cannot find job attempt '%(id)s'.") % {'id': job.jobId}, e)
-
-  link = '/%s/' % name
-  params = {}
-  if offset and int(offset) >= 0:
-    params['start'] = offset
-
-  root = Resource(get_log_client(log_link), urlparse.urlsplit(log_link)[2], urlencode=False)
-  debug_info = ''
-  try:
-    response = root.get(link, params=params)
-    log = html.fromstring(response, parser=html.HTMLParser()).xpath('/html/body/table/tbody/tr/td[2]')[0].text_content()
   except Exception, e:
-    log = _('Failed to retrieve log: %s' % e)
-    try:
-      debug_info = '\nLog Link: %s' % log_link
-      debug_info += '\nHTML Response: %s' % response
-      LOGGER.error(debug_info)
-    except:
-      LOGGER.exception('failed to create debug info')
+    raise Exception(_("Failed to get application for job %s: %s") % (job.jobId, e))
 
-  response = {'log': LinkJobLogs._make_hdfs_links(log), 'debug': debug_info}
+  if log_link:
+    link = '/%s/' % name
+    params = {}
+    if offset != 0:
+      params['start'] = offset
+
+    root = Resource(get_log_client(log_link), urlparse.urlsplit(log_link)[2], urlencode=False)
+    api_resp = None
+
+    try:
+      api_resp = root.get(link, params=params)
+      log = html.fromstring(api_resp, parser=html.HTMLParser()).xpath('/html/body/table/tbody/tr/td[2]')[0].text_content()
+
+      response['status'] = 0
+      response['log'] = LinkJobLogs._make_hdfs_links(log)
+    except Exception, e:
+      response['log'] = _('Failed to retrieve log: %s' % e)
+      try:
+        debug_info = '\nLog Link: %s' % log_link
+        if api_resp:
+          debug_info += '\nHTML Response: %s' % response
+        response['debug'] = debug_info
+        LOG.error(debug_info)
+      except:
+        LOG.exception('failed to create debug info')
 
   return JsonResponse(response)
 
 
 @check_job_permission
-def job_single_logs(request, job):
+def job_single_logs(request, job, offset=LOG_OFFSET_BYTES):
   """
   Try to smartly detect the most useful task attempt (e.g. Oozie launcher, failed task) and get its MR logs.
   """
@@ -338,7 +369,9 @@ def job_single_logs(request, job):
   if task is None or not task.taskAttemptIds:
     raise PopupException(_("No tasks found for job %(id)s.") % {'id': job.jobId})
 
-  return single_task_attempt_logs(request, **{'job': job.jobId, 'taskid': task.taskId, 'attemptid': task.taskAttemptIds[-1]})
+  params = {'job': job.jobId, 'taskid': task.taskId, 'attemptid': task.taskAttemptIds[-1], 'offset': offset}
+
+  return single_task_attempt_logs(request, **params)
 
 
 @check_job_permission
@@ -414,7 +447,7 @@ def single_task_attempt(request, job, taskid, attemptid):
     })
 
 @check_job_permission
-def single_task_attempt_logs(request, job, taskid, attemptid):
+def single_task_attempt_logs(request, job, taskid, attemptid, offset=LOG_OFFSET_BYTES):
   jt = get_api(request.user, request.jt)
 
   job_link = jt.get_job_link(job.jobId)
@@ -435,7 +468,7 @@ def single_task_attempt_logs(request, job, taskid, attemptid):
       diagnostic_log =  ", ".join(task.diagnosticMap[attempt.attemptId])
     logs = [diagnostic_log]
     # Add remaining logs
-    logs += [section.strip() for section in attempt.get_task_log()]
+    logs += [section.strip() for section in attempt.get_task_log(offset=offset)]
     log_tab = [i for i, log in enumerate(logs) if log]
     if log_tab:
       first_log_tab = log_tab[0]

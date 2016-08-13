@@ -579,6 +579,10 @@ class WebHdfs(Hdfs):
 
     while True:
       data = self.read(src, offset, UPLOAD_CHUNK_SIZE.get())
+
+      if skip_header:
+        data = '\n'.join(data.splitlines())
+
       cnt = len(data)
 
       if offset == 0:
@@ -770,6 +774,16 @@ class WebHdfs(Hdfs):
         fn(stat.path, *args, **kwargs)
       except Exception:
         pass
+
+  def upload(self, file, path, *args, **kwargs):
+    username = kwargs.get('username')
+    if not username:
+      raise WebHdfsException(_("Failed to upload file. WebHdfs requires a valid username to upload files."))
+
+    dst = self.join(path, file.name)
+    tmp_file = file.get_temp_path()
+
+    self.do_as_user(username, self.rename, tmp_file, dst)
 
 
 class File(object):

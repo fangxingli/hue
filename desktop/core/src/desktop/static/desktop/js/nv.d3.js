@@ -834,7 +834,7 @@ window.nv.tooltip.* also has various helper methods.
 
 
             container.style.left = left+'px';
-            container.style.top = top+'px';
+            container.style.top = Math.max(top, 0)+'px';
             container.style.opacity = 1;
             container.style.position = 'absolute'; 
 
@@ -920,7 +920,7 @@ nv.utils.getColor = function(color) {
 
 // Default color chooser uses the index of an object as before.
 nv.utils.defaultColor = function() {
-    var colors = d3.scale.category20().range();
+    var colors = d3.scale.ordinal().range(HueColors.cuiD3Scale()).range();
     return function(d, i) { return d.color || colors[i % colors.length] };
 }
 

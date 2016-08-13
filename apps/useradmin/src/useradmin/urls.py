@@ -27,6 +27,7 @@ urlpatterns = patterns('useradmin.views',
   url(r'^users$', 'list_users'),
   url(r'^groups$', 'list_groups'),
   url(r'^permissions$', 'list_permissions'),
+  url(r'^configurations$', 'list_configurations'),
   url(r'^users/edit/(?P<username>%s)$' % (username_re,), 'edit_user'),
   url(r'^view_user/(?P<username>%s)$' % (username_re,), 'view_user'),
   url(r'^users/add_ldap_users$', 'add_ldap_users'),
@@ -38,4 +39,8 @@ urlpatterns = patterns('useradmin.views',
   url(r'^groups/new$', 'edit_group', name="useradmin.new_group"),
   url(r'^users/delete', 'delete_user'),
   url(r'^groups/delete$', 'delete_group'),
+)
+
+urlpatterns += patterns('useradmin.api',
+  url(r'^api/get_users/?', 'get_users', name='api_get_users'),
 )

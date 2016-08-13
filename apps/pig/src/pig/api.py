@@ -17,7 +17,6 @@
 
 import json
 import logging
-import re
 import time
 
 from django.core.urlresolvers import reverse
@@ -25,11 +24,11 @@ from django.utils.translation import ugettext as _
 
 from desktop.lib.i18n import smart_str
 from desktop.lib.view_util import format_duration_in_millis
-from jobbrowser.views import job_single_logs
-from jobbrowser.models import LinkJobLogs
 from liboozie.oozie_api import get_oozie
 from oozie.models import Workflow, Pig
+from oozie.views.api import get_log as get_workflow_logs
 from oozie.views.editor import _submit_workflow
+
 
 LOG = logging.getLogger(__name__)
 
@@ -42,17 +41,19 @@ class OozieApi(object):
   """
   Oozie submission.
   """
+
   WORKFLOW_NAME = 'pig-app-hue-script'
-  RE_LOG_END = re.compile('(<<< Invocation of Pig command completed <<<|<<< Invocation of Main class completed <<<)')
-  RE_LOG_START_RUNNING = re.compile('>>> Invoking Pig command line now >>>(.+?)(<<< Invocation of Pig command completed <<<|<<< Invocation of Main class completed)', re.M | re.DOTALL)
-  RE_LOG_START_FINISHED = re.compile('(>>> Invoking Pig command line now >>>)', re.M | re.DOTALL)
+  LOG_START_PATTERN = '(Pig script \[(?:[\w.-]+)\] content:.+)'
+  LOG_END_PATTERN = '(<<< Invocation of Pig command completed <<<|<<< Invocation of Main class completed <<<)'
   MAX_DASHBOARD_JOBS = 100
+
 
   def __init__(self, fs, jt, user):
     self.oozie_api = get_oozie(user)
     self.fs = fs
     self.jt = jt
     self.user = user
+
 
   def submit(self, pig_script, params):
     workflow = None
@@ -66,6 +67,7 @@ class OozieApi(object):
         workflow.delete(skip_trash=True)
 
     return oozie_wf
+
 
   def _create_workflow(self, pig_script, params):
     workflow = Workflow.objects.new_workflow(self.user)
@@ -140,6 +142,7 @@ class OozieApi(object):
 
     return workflow
 
+
   def _build_parameters(self, params):
     pig_params = []
 
@@ -155,8 +158,10 @@ class OozieApi(object):
 
     return pig_params
 
+
   def stop(self, job_id):
     return self.oozie_api.job_control(job_id, 'kill')
+
 
   def get_jobs(self):
     kwargs = {'cnt': OozieApi.MAX_DASHBOARD_JOBS,}
@@ -167,51 +172,10 @@ class OozieApi(object):
 
     return self.oozie_api.get_workflows(**kwargs).jobs
 
-  def get_log(self, request, oozie_workflow):
-    logs = {}
-    is_really_done = False
 
-    for action in oozie_workflow.get_working_actions():
-      try:
-        if action.externalId:
-          data = job_single_logs(request, **{'job': action.externalId})
-          if data:
-            matched_logs = self._match_logs(data)
-            logs[action.name] = LinkJobLogs._make_links(matched_logs)
-            is_really_done = OozieApi.RE_LOG_END.search(data['logs'][1]) is not None
-
-      except Exception, e:
-        LOG.error('An error happen while watching the job running: %(error)s' % {'error': e})
-        is_really_done = True
-
-    workflow_actions = []
-
-    # Only one Pig action
-    for action in oozie_workflow.get_working_actions():
-      progress = get_progress(oozie_workflow, logs.get(action.name, ''))
-      appendable = {
-        'name': action.name,
-        'status': action.status,
-        'logs': logs.get(action.name, ''),
-        'isReallyDone': is_really_done,
-        'progress': progress,
-        'progressPercent': '%d%%' % progress,
-        'absoluteUrl': oozie_workflow.get_absolute_url(),
-      }
-      workflow_actions.append(appendable)
-
-    return logs, workflow_actions, is_really_done
-
-  def _match_logs(self, data):
-    """Difficult to match multi lines of text"""
-    logs = data['logs'][1]
-
-    if OozieApi.RE_LOG_END.search(logs):
-      return re.search(OozieApi.RE_LOG_START_RUNNING, logs).group(1).strip()
-    else:
-      group = re.search(OozieApi.RE_LOG_START_FINISHED, logs)
-      i = logs.index(group.group(1)) + len(group.group(1))
-      return logs[i:].strip()
+  def get_log(self, request, oozie_workflow, make_links=True):
+    return get_workflow_logs(request, oozie_workflow, make_links=make_links, log_start_pattern=self.LOG_START_PATTERN,
+                             log_end_pattern=self.LOG_END_PATTERN)
 
 
   def massaged_jobs_for_json(self, request, oozie_jobs, hue_jobs):
@@ -263,15 +227,6 @@ class OozieApi(object):
       jobs.append(massaged_job)
 
     return jobs
-
-def get_progress(job, log):
-  if job.status in ('SUCCEEDED', 'KILLED', 'FAILED'):
-    return 100
-  else:
-    try:
-      return int(re.findall("MapReduceLauncher  - (1?\d?\d)% complete", log)[-1])
-    except:
-      return 0
 
 
 def format_time(st_time):

@@ -30,6 +30,10 @@
   <script type="text/javascript" src="${ static('desktop/js/hue.utils.js') }"></script>
   <script type="text/javascript" src="${ static('desktop/ext/js/jquery/plugins/jquery.total-storage.min.js') }"></script>
 
+  <script src="${ static('desktop/js/ace/ace.js') }"></script>
+  <script src="${ static('desktop/js/ace/ext-language_tools.js') }"></script>
+  <script src="${ static('desktop/js/ace.extended.js') }"></script>
+
   ${ require.config() }
 
   <script type="text/javascript" charset="utf-8">
@@ -40,14 +44,18 @@
       paths: {
         'jasmine': 'desktop/ext/js/jasmine-2.3.4/jasmine',
         'jasmine-html': 'desktop/ext/js/jasmine-2.3.4/jasmine-html',
-        'jasmine-boot': 'desktop/ext/js/jasmine-2.3.4/boot'
+        'jasmine-boot': 'desktop/ext/js/jasmine-2.3.4/boot',
+        'mock-ajax':  'desktop/ext/js/jasmine-2.3.4/mock-ajax'
       },
       shim: {
         'jasmine-html': {
-          deps : ['jasmine']
+          deps: ['jasmine']
         },
         'jasmine-boot': {
-          deps : ['jasmine', 'jasmine-html']
+          deps: ['jasmine', 'jasmine-html']
+        },
+        'mock-ajax': {
+          deps: ['jasmine-boot']
         }
       }
     })

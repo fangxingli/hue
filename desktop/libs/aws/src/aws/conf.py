@@ -52,11 +52,19 @@ AWS_ACCOUNTS = UnspecifiedConfigSection(
 )
 
 
+def is_enabled():
+  return 'default' in AWS_ACCOUNTS.keys() and AWS_ACCOUNTS['default'].get_raw()
+
+
+def is_default_configured():
+  return is_enabled() and AWS_ACCOUNTS['default'].ACCESS_KEY_ID.get() is not None
+
+
 def config_validator(user):
   res = []
 
-  if AWS_ACCOUNTS.keys():
-    if 'default' not in AWS_ACCOUNTS.keys():
+  if is_enabled():
+    if not is_default_configured():  # Make a redundant call to is_enabled so that we only check default if it's non-empty
       res.append(('aws.aws_accounts', 'Default AWS account is not configured'))
 
     regions = get_regions('s3')  # S3 is only supported service so far

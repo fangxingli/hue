@@ -97,7 +97,7 @@ ${ layout.menubar(section='coordinators', is_editor=True) }
         <td data-bind="text: name"></td>
         <td data-bind="text: description"></td>
         <td data-bind="text: owner"></td>
-        <td data-bind="text: last_modified, attr: { 'data-sort-value': last_modified_ts }" data-type="date"></td>
+        <td data-bind="text: localeFormat(last_modified), attr: { 'data-sort-value': last_modified_ts }" data-type="date"></td>
       </tr>
     </tbody>
   </table>
@@ -143,7 +143,7 @@ ${ commonimportexport(request) | n,unicode }
 <script src="${ static('desktop/ext/js/knockout.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/knockout-mapping.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/ko.hue-bindings.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/js/share.vm.js') }"></script>
+<script src="${ static('desktop/js/share2.vm.js') }"></script>
 <script src="${ static('oozie/js/editor2-utils.js') }" type="text/javascript" charset="utf-8"></script>
 
 
@@ -205,7 +205,7 @@ ${ commonimportexport(request) | n,unicode }
       }, function() {
         window.location.reload();
       }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
+        $(document).trigger("error", xhr.status == 500 ? JSON.parse(xhr.responseText).message : xhr.responseText);
       });
     };
 
@@ -225,7 +225,7 @@ ${ commonimportexport(request) | n,unicode }
     };
 
     self.prepareShareModal = function() {
-     shareViewModel.setDocId(self.selectedJobs()[0].doc1_id());
+     shareViewModel.setDocUuid(self.selectedJobs()[0].uuid());
       openShareModal();
     };
   }
@@ -238,7 +238,7 @@ ${ commonimportexport(request) | n,unicode }
     ko.applyBindings(viewModel, $("#editor")[0]);
 
     shareViewModel = initSharing("#documentShareModal");
-    shareViewModel.setDocId(-1);
+    shareViewModel.setDocUuid('');
 
     var oTable = $("#workflowTable").dataTable({
       "sPaginationType":"bootstrap",

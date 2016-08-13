@@ -38,7 +38,7 @@ from desktop.lib.exceptions_renderable import PopupException
 from django.utils.translation import ugettext as _
 from jobbrowser.conf import DISABLE_KILLING_JOBS
 
-LOGGER = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 def can_view_job(username, job):
@@ -449,11 +449,11 @@ class TaskAttempt(object):
       tracker = Tracker.from_name(self.task.jt, self.taskTrackerId)
       return tracker
     except ttypes.TaskTrackerNotFoundException, e:
-      LOGGER.warn("Tracker %s not found: %s" % (self.taskTrackerId, e))
-      if LOGGER.isEnabledFor(logging.DEBUG):
+      LOG.warn("Tracker %s not found: %s" % (self.taskTrackerId, e))
+      if LOG.isEnabledFor(logging.DEBUG):
         all_trackers = self.task.jt.all_task_trackers()
         for t in all_trackers.trackers:
-          LOGGER.debug("Available tracker: %s" % (t.trackerName,))
+          LOG.debug("Available tracker: %s" % (t.trackerName,))
       raise ttypes.TaskTrackerNotFoundException(
                           _("Cannot look up TaskTracker %(id)s.") % {'id': self.taskTrackerId})
 
@@ -475,7 +475,7 @@ class TaskAttempt(object):
                       None,
                       'attemptid=%s' % (self.attemptId,),
                       None))
-    LOGGER.info('Retrieving %s' % (url,))
+    LOG.info('Retrieving %s' % (url,))
     try:
       data = urllib2.urlopen(url)
     except urllib2.URLError:
@@ -485,7 +485,7 @@ class TaskAttempt(object):
     log_sections = et.findall('body/pre')
     logs = [section.text or '' for section in log_sections]
     if len(logs) < 3:
-      LOGGER.warn('Error parsing task attempt log for %s at "%s". Found %d (not 3) log sections' %
+      LOG.warn('Error parsing task attempt log for %s at "%s". Found %d (not 3) log sections' %
                   (self.attemptId, url, len(log_sections)))
       err = _("Hue encountered an error while retrieving logs from '%s'.") % (url,)
       logs += [err] * (3 - len(logs))
@@ -569,20 +569,20 @@ class LinkJobLogs(object):
   @classmethod
   def _make_mr_links(cls, log):
     escaped_logs = escape(log)
-    return re.sub('(job_[0-9]{12}_[0-9]+)', LinkJobLogs._replace_mr_link, escaped_logs)
+    return re.sub('(job_[0-9]{12,}_[0-9]+)', LinkJobLogs._replace_mr_link, escaped_logs)
 
   @classmethod
   def _make_links(cls, log):
     escaped_logs = escape(log)
     hdfs_links = re.sub('((?<= |;)/|hdfs://)[^ <&\t;,\n]+', LinkJobLogs._replace_hdfs_link, escaped_logs)
-    return re.sub('(job_[0-9]{12}_[0-9]+)', LinkJobLogs._replace_mr_link, hdfs_links)
+    return re.sub('(job_[0-9]{12,}_[0-9]+)', LinkJobLogs._replace_mr_link, hdfs_links)
 
   @classmethod
   def _replace_hdfs_link(self, match):
     try:
       return '<a href="%s" target="_blank">%s</a>' % (location_to_url(match.group(0), strict=False), match.group(0))
     except:
-      LOGGER.exception('failed to replace hdfs links: %s' % (match.groups(),))
+      LOG.exception('failed to replace hdfs links: %s' % (match.groups(),))
       return match.group(0)
 
   @classmethod
@@ -590,7 +590,7 @@ class LinkJobLogs(object):
     try:
       return '<a href="%s" target="_blank">%s</a>' % (reverse('jobbrowser.views.single_job', kwargs={'job': match.group(0)}), match.group(0))
     except:
-      LOGGER.exception('failed to replace mr links: %s' % (match.groups(),))
+      LOG.exception('failed to replace mr links: %s' % (match.groups(),))
       return match.group(0)
 
 

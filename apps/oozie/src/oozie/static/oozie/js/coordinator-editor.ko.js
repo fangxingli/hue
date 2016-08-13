@@ -14,6 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+(function (root, factory) {
+  if(typeof define === "function" && define.amd) {
+    define([
+      'knockout',
+      'knockout-mapping',
+      'ko.charts'
+    ], factory);
+  } else {
+    root.CoordinatorEditorViewModel = factory(ko);
+  }
+}(this, function (ko) {
+
+var COORDINATOR_MAPPING = {
+  ignore: [
+    "availableTimezones", "availableSettings", "filteredModalWorkflows"
+  ]
+};
+
 var Coordinator = function (vm, coordinator) {
 
   var self = this;
@@ -21,6 +39,7 @@ var Coordinator = function (vm, coordinator) {
   self.id = ko.observable(typeof coordinator.id != "undefined" && coordinator.id != null ? coordinator.id : null);
   self.uuid = ko.observable(typeof coordinator.uuid != "undefined" && coordinator.uuid != null ? coordinator.uuid : UUID());
   self.name = ko.observable(typeof coordinator.name != "undefined" && coordinator.name != null ? coordinator.name : "").extend({ trackChange: true });
+  self.isManaged = ko.observable(typeof coordinator.isManaged != "undefined" && coordinator.isManaged != null ? coordinator.isManaged : false);
 
   self.properties = ko.mapping.fromJS(typeof coordinator.properties != "undefined" && coordinator.properties != null ? coordinator.properties : {});
   self.variables = ko.mapping.fromJS(typeof coordinator.variables != "undefined" && coordinator.variables != null ? coordinator.variables : []);
@@ -29,7 +48,7 @@ var Coordinator = function (vm, coordinator) {
   self.showAdvancedFrequencyUI = ko.observable(typeof coordinator.showAdvancedFrequencyUI != "undefined" && coordinator.showAdvancedFrequencyUI != null ? coordinator.showAdvancedFrequencyUI : false);
   self.workflowParameters = ko.mapping.fromJS(typeof coordinator.workflowParameters != "undefined" && coordinator.workflowParameters != null ? coordinator.workflowParameters : []);
 
-  self.tracker = new ChangeTracker(self);  // from ko.common-dashboard.js
+  self.tracker = new ChangeTracker(self, ko);
 
   self.isDirty = ko.computed(function () {
     return self.tracker().somethingHasChanged();
@@ -75,33 +94,36 @@ var Coordinator = function (vm, coordinator) {
     self.end_date.value(self.properties.endDateUI() + "T" + self.properties.endTimeUI());
   }
 
+  self.refreshParameters = function() {
+    $.get("/oozie/editor/workflow/parameters/", {
+      "uuid": self.properties.workflow(),
+    }, function (data) {
+      self.workflowParameters(data.parameters);
+
+      // Remove Uncommon params
+      prev_variables = self.variables.slice();
+      $.each(prev_variables, function (index, variable) {
+        if (data.parameters.filter(function(param) { return param['name'] == variable.workflow_variable() }).length == 0) {
+          self.variables.remove(variable);
+        }
+      });
+
+      // Append the new variables
+      prev_variables = self.variables.slice();
+      $.each(data.parameters, function (index, param) {
+        if (prev_variables.filter(function(variable) { return param['name'] == variable.workflow_variable() }).length == 0) {
+          self.addVariable();
+          self.variables()[self.variables().length - 1].workflow_variable(param['name']);
+        }
+      });
+    }).fail(function (xhr, textStatus, errorThrown) {
+      $(document).trigger("error", xhr.responseText);
+    });
+  }
 
   self.properties.workflow.subscribe(function (newVal) {
     if (newVal) {
-      $.get("/oozie/editor/workflow/parameters/", {
-        "uuid": self.properties.workflow(),
-      }, function (data) {
-        self.workflowParameters(data.parameters);
-
-        // Remove Uncommon params
-        prev_variables = self.variables.slice();
-        $.each(prev_variables, function (index, variable) {
-          if (data.parameters.filter(function(param) { return param['name'] == variable.workflow_variable() }).length == 0) {
-            self.variables.remove(variable);
-          }
-        });
-
-        // Append the new variables
-        prev_variables = self.variables.slice();
-        $.each(data.parameters, function (index, param) {
-          if (prev_variables.filter(function(variable) { return param['name'] == variable.workflow_variable() }).length == 0) {
-            self.addVariable();
-            self.variables()[self.variables().length - 1].workflow_variable(param['name']);
-          }
-        });
-      }).fail(function (xhr, textStatus, errorThrown) {
-        $(document).trigger("error", xhr.responseText);
-      });
+      self.refreshParameters();
     }
   });
 
@@ -156,7 +178,7 @@ var CoordinatorEditorViewModel = function (coordinator_json, credentials_json, w
 
   if (! coordinator_json['properties']['timezone']) {
     coordinator_json['properties']['timezone'] = tzdetect.matches()[0];
-   }
+  }
   self.canEdit = ko.mapping.fromJS(can_edit_json);
   self.isEditing = ko.observable(coordinator_json.id == null);
   self.isEditing.subscribe(function (newVal) {
@@ -176,7 +198,7 @@ var CoordinatorEditorViewModel = function (coordinator_json, credentials_json, w
   self.availableSettings = ko.observableArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]);
 
   if (coordinator_json.id == null && self.coordinator.properties.workflow()) {
-    self.coordinator.properties.workflow.valueHasMutated();
+    self.coordinator.refreshParameters();
   }
 
   self.workflowModalFilter = ko.observable("");
@@ -202,18 +224,22 @@ var CoordinatorEditorViewModel = function (coordinator_json, credentials_json, w
     return null;
   }
 
-
-  self.save = function () {
+  self.save = function (cb) {
     if (!self.isSaving()) {
       self.isSaving(true);
       $(".jHueNotify").hide();
       $.post("/oozie/editor/coordinator/save/", {
-        "coordinator": ko.mapping.toJSON(self.coordinator)
+        "coordinator": ko.mapping.toJSON(self.coordinator, COORDINATOR_MAPPING)
       }, function (data) {
         if (data.status == 0) {
           self.coordinator.id(data.id);
           self.coordinator.tracker().markCurrentStateAsClean();
-          $(document).trigger("info", data.message);
+          if (typeof cb === 'function') {
+            cb(data);
+          }
+          else {
+        	  $(document).trigger("info", data.message);
+          }
           if (window.location.search.indexOf("coordinator") == -1) {
             window.location.hash = '#coordinator=' + data.id;
           }
@@ -234,7 +260,7 @@ var CoordinatorEditorViewModel = function (coordinator_json, credentials_json, w
     logGA('gen_xml');
 
     $.post("/oozie/editor/coordinator/gen_xml/", {
-      "coordinator": ko.mapping.toJSON(self.coordinator)
+      "coordinator": ko.mapping.toJSON(self.coordinator, COORDINATOR_MAPPING)
     }, function (data) {
       if (data.status == 0) {
         console.log(data.xml);
@@ -268,3 +294,6 @@ function logGA(page) {
     trackOnGA('oozie/editor/coordinator/' + page);
   }
 }
+
+  return CoordinatorEditorViewModel;
+}));

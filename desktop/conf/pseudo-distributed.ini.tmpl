@@ -25,7 +25,7 @@
   secret_key=
 
   # Execute this script to produce the Django secret key. This will be used when
-  # `secret_key` is not set.
+  # 'secret_key' is not set.
   ## secret_key_script=
 
   # Webserver listens on this address and port
@@ -85,8 +85,24 @@
   # SSL certificate password
   ## ssl_password=
 
-  # Execute this script to produce the SSL password. This will be used when `ssl_password` is not set.
+  # Execute this script to produce the SSL password. This will be used when 'ssl_password' is not set.
   ## ssl_password_script=
+
+  # X-Content-Type-Options: nosniff This is a HTTP response header feature that helps prevent attacks based on MIME-type confusion.
+  ## secure_content_type_nosniff=true
+
+  # X-Xss-Protection: \"1; mode=block\" This is a HTTP response header feature to force XSS protection.
+  ## secure_browser_xss_filter=true
+
+  # X-Content-Type-Options: nosniff This is a HTTP response header feature that helps prevent attacks based on MIME-type confusion.
+  ## secure_content_security_policy="script-src 'self' 'unsafe-inline' 'unsafe-eval' *.google-analytics.com *.doubleclick.net *.mathjax.org data:;img-src 'self' *.google-analytics.com *.doubleclick.net data:;style-src 'self' 'unsafe-inline';connect-src 'self';child-src 'none';object-src 'none'"
+
+  # Strict-Transport-Security HTTP Strict Transport Security(HSTS) is a policy which is communicated by the server to the user agent via HTTP response header field name “Strict-Transport-Security”. HSTS policy specifies a period of time during which the user agent(browser) should only access the server in a secure fashion(https).
+  ## secure_ssl_redirect=False
+  ## secure_redirect_host=0.0.0.0
+  ## secure_redirect_exempt=[]
+  ## secure_hsts_seconds=31536000
+  ## secure_hsts_include_subdomains=true
 
   # List of allowed and disallowed ciphers in cipher list format.
   # See http://www.openssl.org/docs/apps/ciphers.html for more information on
@@ -122,7 +138,7 @@
   # The copyright message for the specified Leaflet maps Tile Layer
   ## leaflet_tile_layer_attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
 
-  # X-Frame-Options HTTP header value. Use 'DENY' to deny framing completely                   
+  # X-Frame-Options HTTP header value. Use 'DENY' to deny framing completely
   ## http_x_frame_options=SAMEORIGIN
 
   # Enable X-Forwarded-Host header if the load balancer requires it.
@@ -138,11 +154,21 @@
   # Comma-separated list of regular expressions, which match the redirect URL.
   # For example, to restrict to your local domain and FQDN, the following value can be used:
   # ^\/.*$,^http:\/\/www.mydomain.com\/.*$
-  ## redirect_whitelist=^\/.*$
+  ## redirect_whitelist=^(\/[a-zA-Z0-9]+.*|\/)$
 
   # Comma separated list of apps to not load at server startup.
   # e.g.: pig,zookeeper
   ## app_blacklist=
+
+  # Choose whether to show the new SQL editor.
+  ## use_new_editor=true
+
+  # Editor autocomplete timeout (ms) when fetching columns, fields, tables etc.
+  # To disable this type of autocompletion set the value to 0
+  ## editor_autocomplete_timeout=3000
+
+  # Enable saved default configurations for Hive, Impala, Spark, and Oozie.
+  ## use_default_configuration=false
 
   # The directory where to store the auditing logs. Auditing is disable if the value is empty.
   # e.g. /var/log/hue/audit.log
@@ -174,9 +200,9 @@
   #
   # Redaction works by searching a string for the [TRIGGER] string. If found,
   # the [REGEX] is used to replace sensitive information with the
-  # [REDACTION_MASK].  If specified with `log_redaction_string`, the
-  # `log_redaction_string` rules will be executed after the
-  # `log_redaction_file` rules.
+  # [REDACTION_MASK].  If specified with 'log_redaction_string', the
+  # 'log_redaction_string' rules will be executed after the
+  # 'log_redaction_file' rules.
   #
   # For example, here is a file that would redact passwords and social security numbers:
 
@@ -220,7 +246,7 @@
 
     # Login splash HTML code
     # e.g. WARNING: You are required to have authorization before you proceed
-    ## login_splash_html=
+    ## login_splash_html=<h4>GetHue.com</h4><br/><br/>WARNING: You have accessed a computer managed by GetHue. You are required to have authorization from GetHue before you proceed.
 
     # Cache timeout in milliseconds for the assist, autocomplete, etc.
     # defaults to 86400000 (1 day), set to 0 to disable caching
@@ -267,9 +293,12 @@
     # Supported in remoteUserDjangoBackend and SpnegoDjangoBackend
     ## ignore_username_case=true
 
-    # Ignore the case of usernames when searching for existing users to authenticate with.
+    # Forcibly cast usernames to lowercase, takes precedence over force_username_uppercase
     # Supported in remoteUserDjangoBackend and SpnegoDjangoBackend
     ## force_username_lowercase=true
+
+    # Forcibly cast usernames to uppercase, cannot be combined with force_username_lowercase
+    ## force_username_uppercase=false
 
     # Users will expire after they have not logged in for 'n' amount of seconds.
     # A negative number means that users will never expire.
@@ -294,8 +323,9 @@
     # If set, defines period of inactivity in seconds after which failed logins will be forgotten
     ## login_cooloff_time=60
 
-    # If True, lock out based on IP and browser user agent
-    ## login_lock_out_by_combination_browser_user_agent_and_ip=false
+    # If True, lock out based on an IP address AND a user agent.
+    # This means requests from different user agents but from the same IP are treated differently.
+    ## login_lock_out_use_user_agent=false
 
     # If True, lock out based on IP and user
     ## login_lock_out_by_combination_user_and_ip=false
@@ -330,7 +360,7 @@
     ## bind_password=
 
     # Execute this script to produce the bind user password. This will be used
-    # when `bind_password` is not set.
+    # when 'bind_password' is not set.
     ## bind_password_script=
 
     # Pattern for searching for usernames -- Use <username> for the parameter
@@ -348,7 +378,11 @@
     ## ignore_username_case=true
 
     # Force usernames to lowercase when creating new users from LDAP.
+    # Takes precedence over force_username_uppercase
     ## force_username_lowercase=true
+
+    # Force usernames to uppercase, cannot be combined with force_username_lowercase
+    ## force_username_uppercase=false
 
     # Use search bind authentication.
     ## search_bind_authentication=true
@@ -421,7 +455,7 @@
         ## bind_password=
 
         # Execute this script to produce the bind user password. This will be used
-        # when `bind_password` is not set.
+        # when 'bind_password' is not set.
         ## bind_password_script=
 
         # Pattern for searching for usernames -- Use <username> for the parameter
@@ -469,13 +503,15 @@
     #
     # Note that for sqlite3, 'name', below is a path to the filename. For other backends, it is the database name.
     # Note for Oracle, options={"threaded":true} must be set in order to avoid crashes.
-    # Note for Oracle, you can use the Oracle Service Name by setting "port=0" and then "name=<host>:<port>/<service_name>".
+    # Note for Oracle, you can use the Oracle Service Name by setting "host=" and "port=" and then "name=<host>:<port>/<service_name>".
     # Note for MariaDB use the 'mysql' engine.
     ## engine=sqlite3
     ## host=
     ## port=
     ## user=
     ## password=
+    # Execute this script to produce the database password. This will be used when 'password' is not set.
+    ## password_script=/path/script
     ## name=desktop/desktop.db
     ## options={}
 
@@ -565,6 +601,15 @@
 
 [notebook]
 
+  ## Show the notebook menu or not
+  # show_notebooks=true
+
+  ## Flag to enable the bulk submission of queries as a background task through Oozie.
+  # enable_batch_execute=true
+
+  ## Flag to enable the Java document in editor and workflow.
+  # enable_java_document=true
+
   ## Base URL to Remote GitHub Server
   # github_remote_url=https://github.com
 
@@ -643,6 +688,16 @@
       name = Oracle
       interface=rdbms
 
+    [[[solr]]]
+      name = Solr SQL
+      interface=solr
+      ## Name of the collection handler
+      # options='{"collection": "default"}'
+
+    [[[java]]]
+      name=Java
+      interface=oozie
+
     # [[[mysql]]]
     #   name=MySql JDBC
     #   interface=jdbc
@@ -653,6 +708,13 @@
 
   ## Main flag to override the automatic starting of the DBProxy server.
   # enable_dbproxy_server=true
+
+  ## Flag to enable the SQL query builder of the table assist.
+  # enable_query_builder=true
+
+  ## Flag to enable the creation of a coordinator for the current SQL query.
+  # enable_query_scheduling=true
+
 
 ###########################################################################
 # Settings to configure your Hadoop cluster.
@@ -715,6 +777,9 @@
 
       # URL of the HistoryServer API
       ## history_server_api_url=http://localhost:19888
+
+      # URL of the Spark History Server
+      ## spark_history_server_url=http://localhost:18088
 
       # In secure mode (HTTPS), if SSL certificates from YARN Rest APIs
       # have to be verified against certificate authority
@@ -796,10 +861,10 @@
   # The maximum number of partitions that will be included in the SELECT * LIMIT sample query for partitioned tables.
   ## query_partitions_limit=10
 
-  # A limit to the number of rows that can be downloaded from a query.
+  # A limit to the number of cells (rows * columns) that can be downloaded from a query
+  # (e.g. - 10K rows * 1K columns = 10M cells.)
   # A value of -1 means there will be no limit.
-  # A maximum of 30,000 is applied to XLS downloads.
-  ## download_row_limit=1000000
+  ## download_cell_limit=10000000
 
   # Hue will try to close the Hive query when the user leaves the editor page.
   # This will free all the query resources in HiveServer2, but also make its results inaccessible.
@@ -812,20 +877,17 @@
   # A comma-separated list of white-listed Hive configuration properties that users are authorized to set.
   # config_whitelist=hive.map.aggr,hive.exec.compress.output,hive.exec.parallel,hive.execution.engine,mapreduce.job.queuename
 
+  # Override the default desktop username and password of the hue user used for authentications with other services.
+  # e.g. Used for LDAP/PAM pass-through authentication.
+  ## auth_username=hue
+  ## auth_password=
+
   [[ssl]]
     # Path to Certificate Authority certificates.
     ## cacerts=/etc/hue/cacerts.pem
 
     # Choose whether Hue should validate certificates received from the server.
     ## validate=true
-
-  # Override the default desktop username and password of the hue user used for authentications with other services.
-  # e.g. Used for LDAP/PAM pass-through authentication.
-  ## auth_username=hue
-  ## auth_password=
-
-  # Choose whether to show the new SQL editor.
-  ## use_new_editor=true
 
 
 ###########################################################################
@@ -865,6 +927,14 @@
   # (compute or send back results) for that session within QUERY_TIMEOUT_S seconds (default 12hours).
   ## session_timeout_s=43200
 
+  # Override the desktop default username and password of the hue user used for authentications with other services.
+  # e.g. Used for LDAP/PAM pass-through authentication.
+  ## auth_username=hue
+  ## auth_password=
+
+  # A comma-separated list of white-listed Impala configuration properties that users are authorized to set.
+  ## config_whitelist=debug_action,explain_level,mem_limit,optimize_partition_key_scans,query_timeout_s,request_pool
+
   [[ssl]]
     # SSL communication enabled for this server.
     ## enabled=false
@@ -874,11 +944,6 @@
 
     # Choose whether Hue should validate certificates received from the server.
     ## validate=true
-
-  # Override the desktop default username and password of the hue user used for authentications with other services.
-  # e.g. Used for LDAP/PAM pass-through authentication.
-  ## auth_username=hue
-  ## auth_password=
 
 
 ###########################################################################
@@ -892,11 +957,8 @@
   # Port of the Livy Server.
   ## livy_server_port=8998
 
-  # Configure livy to start in local 'process' mode, or 'yarn' workers.
-  ## livy_server_session_kind=process
-
-  # If livy should use proxy users when submitting a job.
-  ## livy_impersonation_enabled=true
+  # Configure Livy to start in local 'process' mode, or 'yarn' workers.
+  ## livy_server_session_kind=yarn
 
   # Host of the Sql Server
   ## sql_server_host=localhost
@@ -925,6 +987,8 @@
   # Use Cron format for defining the frequency of a Coordinator instead of the old frequency number/unit.
   ## enable_cron_scheduling=true
 
+  # Offset in bytes where a negative offset will fetch the last N bytes for the given log file (default 1MB).
+  ## log_offset=-1000000
 
 ###########################################################################
 # Settings to configure the Filebrowser app
@@ -1032,6 +1096,9 @@
   # Choose whether Hue should validate certificates received from the server.
   ## ssl_cert_ca_verify=true
 
+  # Default path to Solr in ZooKeeper.
+  ## solr_zk_path=/solr
+
 
 ###########################################################################
 # Settings to configure Solr Indexer
@@ -1068,6 +1135,8 @@
   # Whether to disalbe the job kill button for all users in the jobbrowser
   ## disable_killing_jobs=false
 
+  # Offset in bytes where a negative offset will fetch the last N bytes for the given log file (default 1MB).
+  ## log_offset=-1000000
 
 ###########################################################################
 # Settings to configure Sentry / Security App.
@@ -1082,7 +1151,7 @@
   ## hive_v2=false
 
   # Use Sentry API V2 for Solr.
-  ## solr_v2=false
+  ## solr_v2=true
 
 
 ###########################################################################
@@ -1287,7 +1356,7 @@
   # Path to a file containing the password private key.
   ## key_file_password=/path/key
 
-  # Execute this script to produce the private key password. This will be used when `key_file_password` is not set.
+  # Execute this script to produce the private key password. This will be used when 'key_file_password' is not set.
   ## key_file_password_script=/path/pwd.sh
 
   # A mapping from attributes in the response from the IdP to django user attributes.
@@ -1392,7 +1461,7 @@
 ###########################################################################
 
 [metadata]
-  # For metadata tagging and enrichment features
+  # For metadata tagging and enhancement features
 
   [[optimizer]]
     # For SQL query and table analysis
@@ -1402,14 +1471,14 @@
     ## product_name=hue
     # A secret passphrase associated with the productName
     ## product_secret=hue
-    # Execute this script to produce the product secret. This will be used when `product_secret` is not set.
+    # Execute this script to produce the product secret. This will be used when 'product_secret' is not set.
     ## product_secret_script=
 
     # The email of the Optimizer account you want to associate with the Product.
     ## email=hue@gethue.com
     # The password associated with the Optimizer account you to associate with the Product.
     ## email_password=hue
-    # Execute this script to produce the email password. This will be used when `email_password` is not set.
+    # Execute this script to produce the email password. This will be used when 'email_password' is not set.
     ## password_script=
 
     # In secure mode (HTTPS), if Optimizer SSL certificates have to be verified against certificate authority.
@@ -1417,8 +1486,8 @@
 
   [[navigator]]
     # For tagging tables, files and getting lineage of data.
-    # Navigator API URL with version
-    ## api_url=http://localhost:7187/api/v2
+    # Navigator API URL with version (without version suffix)
+    ## api_url=http://localhost:7187/api
 
     # Navigator API HTTP authentication username and password
     # Override the desktop default username and password of the hue user used for authentications with other services.

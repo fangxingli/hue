@@ -24,7 +24,9 @@ from desktop.lib.django_util import JsonResponse, render
 
 from indexer.controller2 import IndexController
 from indexer.management.commands import indexer_setup
-
+from indexer.fields import FIELD_TYPES, Field
+from indexer.operations import OPERATORS
+from indexer.file_format import get_file_indexable_format_types
 
 LOG = logging.getLogger(__name__)
 
@@ -36,14 +38,28 @@ def collections(request, is_redirect=False):
 def indexes(request):
   searcher = IndexController(request.user)
   indexes = searcher.get_indexes()
-  
+
   for index in indexes:
     index['isSelected'] = False
 
   return render('indexes.mako', request, {
-      'indexes_json': json.dumps(indexes),
+      'indexes_json': json.dumps(indexes)
   })
 
+def indexer(request):
+  searcher = IndexController(request.user)
+  indexes = searcher.get_indexes()
+
+  for index in indexes:
+    index['isSelected'] = False
+
+  return render('indexer.mako', request, {
+      'indexes_json': json.dumps(indexes),
+      'fields_json' : json.dumps([field.name for field in FIELD_TYPES]),
+      'operators_json' : json.dumps([operator.to_dict() for operator in OPERATORS]),
+      'file_types_json' : json.dumps([format_.format_info() for format_ in get_file_indexable_format_types()]),
+      'default_field_type' : json.dumps(Field().to_dict())
+  })
 
 def install_examples(request, is_redirect=False):
   result = {'status': -1, 'message': ''}

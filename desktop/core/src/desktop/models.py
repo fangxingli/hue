@@ -16,30 +16,32 @@
 # limitations under the License.
 
 import calendar
-import logging
 import json
+import logging
 import os
 import re
 import uuid
 
-from datetime import datetime
 from itertools import chain
 
 from django.contrib.auth import models as auth_models
 from django.contrib.contenttypes import generic
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.staticfiles.storage import staticfiles_storage
-from django.core.urlresolvers import reverse
+from django.core.urlresolvers import reverse, NoReverseMatch
 from django.db import connection, models, transaction
 from django.db.models import Q
+from django.db.models.query import QuerySet
 from django.template.defaultfilters import urlencode
 from django.utils.translation import ugettext as _, ugettext_lazy as _t
+
+from settings import HUE_DESKTOP_VERSION
 
 from desktop import appmanager
 from desktop.lib.i18n import force_unicode
 from desktop.lib.exceptions_renderable import PopupException
+from desktop.lib.paths import get_run_root
 from desktop.redaction import global_redaction_engine
-from notebook.models import make_notebook
 
 
 LOG = logging.getLogger(__name__)
@@ -49,12 +51,29 @@ SAMPLE_USER_INSTALL = 'hue'
 SAMPLE_USER_OWNERS = ['hue', 'sample']
 
 UTC_TIME_FORMAT = "%Y-%m-%dT%H:%MZ"
-
+HUE_VERSION = None
 
 def uuid_default():
   return str(uuid.uuid4())
 
+def hue_version():
+  global HUE_VERSION
 
+  if HUE_VERSION is None:
+    p = get_run_root('cloudera', 'cdh_version.properties')
+    if os.path.exists(p):
+      HUE_VERSION = _version_from_properties(open(p))
+    else:
+      HUE_VERSION = HUE_DESKTOP_VERSION
+
+  return HUE_VERSION
+
+def _version_from_properties(f):
+  return dict(line.strip().split('=') for line in f.readlines() if len(line.strip().split('=')) == 2).get('version', HUE_DESKTOP_VERSION)
+
+###################################################################################################
+# Custom Settings
+###################################################################################################
 class UserPreferences(models.Model):
   """Holds arbitrary key/value strings."""
   user = models.ForeignKey(auth_models.User)
@@ -72,6 +91,81 @@ class Settings(models.Model):
     return settings
 
 
+class DefaultConfigurationManager(models.Manager):
+
+  def get_configuration_for_user(self, app, user):
+    """
+    :param app: app name
+    :param user: User object
+    :return: DefaultConfiguration for user, or first group found, or default for app, or None
+    """
+    try:
+      return super(DefaultConfigurationManager, self).get(app=app, user=user)
+    except DefaultConfiguration.DoesNotExist:
+      pass
+
+    configs = super(DefaultConfigurationManager, self).get_queryset().filter(app=app, groups__in=user.groups.all())
+    if configs.count() > 0:
+      return configs[0]
+
+    try:
+      return super(DefaultConfigurationManager, self).get(app=app, is_default=True)
+    except DefaultConfiguration.DoesNotExist:
+      pass
+
+    return None
+
+
+class DefaultConfiguration(models.Model):
+  """
+  Default values for configuration properties for a given app/editor
+  Can be designated as default for all users by is_default flag, or for a specific group or user
+  """
+  app = models.CharField(max_length=32, null=False, db_index=True, help_text=_t('App that this configuration belongs to.'))
+  properties = models.TextField(default='[]', help_text=_t('JSON-formatted default properties values.'))
+
+  is_default = models.BooleanField(default=False, db_index=True)
+  groups = models.ManyToManyField(auth_models.Group, db_index=True, db_table='defaultconfiguration_groups')
+  user = models.ForeignKey(auth_models.User, blank=True, null=True, db_index=True)
+
+  objects = DefaultConfigurationManager()
+
+  class Meta:
+    ordering = ["app", "-is_default", "user"]
+
+
+  @property
+  def properties_list(self):
+    """
+    :return: Deserialized properties as a list of property objects
+    """
+    if not self.properties:
+      self.properties = json.dumps([])
+    return json.loads(self.properties)
+
+  @property
+  def properties_dict(self):
+    """
+    :return: Deserialized properties as a dict of key: value pairs
+    """
+    if not self.properties:
+      self.properties = json.dumps([])
+    return dict((prop['key'], prop['value']) for prop in json.loads(self.properties))
+
+  def to_dict(self):
+    return {
+      'id': self.id,
+      'app': self.app,
+      'properties': self.properties_list,
+      'is_default': self.is_default,
+      'group_ids': [group.id for group in self.groups.all()],
+      'user': self.user.username if self.user else None
+    }
+
+
+###################################################################################################
+# Document1
+###################################################################################################
 class DocumentTagManager(models.Manager):
 
   def get_tags(self, user):
@@ -277,7 +371,13 @@ class DocumentManager(models.Manager):
   def sync(self):
 
     def find_jobs_with_no_doc(model):
-      return model.objects.filter(doc__isnull=True).select_related('owner')
+      jobs = model.objects.filter(doc__isnull=True)
+      if model == Document2:
+        jobs = jobs.exclude(is_history=True)
+      return jobs.select_related('owner')
+
+    def find_oozie_jobs_with_no_doc(model):
+      return model.objects.filter(doc__isnull=True).exclude(name__exact='').select_related('owner')
 
     table_names = connection.introspection.table_names()
 
@@ -290,9 +390,9 @@ class DocumentManager(models.Manager):
           Bundle._meta.db_table in table_names:
         with transaction.atomic():
           for job in chain(
-              find_jobs_with_no_doc(Workflow),
-              find_jobs_with_no_doc(Coordinator),
-              find_jobs_with_no_doc(Bundle)):
+              find_oozie_jobs_with_no_doc(Workflow),
+              find_oozie_jobs_with_no_doc(Coordinator),
+              find_oozie_jobs_with_no_doc(Bundle)):
             doc = Document.objects.link(job, owner=job.owner, name=job.name, description=job.description)
 
             if job.is_trashed:
@@ -753,76 +853,110 @@ class FilesystemException(Exception):
   pass
 
 
-class Document2Manager(models.Manager):
+class Document2QueryMixin(object):
 
-  # TODO prevent get
-  def document(self, user, doc_id):
-    return self.documents(user).get(id=doc_id)
-
-  def documents(self, user, perms='both', include_history=False):
+  def documents(self, user, perms='both', include_history=False, include_trashed=False, include_managed=False):
     """
     Returns all documents that are owned or shared with the user.
     :param perms: both, shared, owned. Defaults to both.
     :param include_history: boolean flag to return history documents. Defaults to False.
+    :param include_trashed: boolean flag to return trashed documents. Defaults to True.
     """
     if perms == 'both':
-      docs = Document2.objects.filter(
+      docs = self.filter(
         Q(owner=user) |
         Q(document2permission__users=user) |
         Q(document2permission__groups__in=user.groups.all())
       )
     elif perms == 'shared':
-      docs = Document2.objects.filter(
+      docs = self.filter(
         Q(document2permission__users=user) |
         Q(document2permission__groups__in=user.groups.all())
       )
     else:  # only return documents owned by the user
-      docs = Document2.objects.filter(owner=user)
+      docs = self.filter(owner=user)
 
     if not include_history:
       docs = docs.exclude(is_history=True)
 
-    return docs.defer('description', 'data', 'extra').distinct().order_by('-last_modified')
+    if not include_managed:
+      docs = docs.exclude(is_managed=True)
 
-  def refine_documents(self, documents, types=None, search_text=None, order_by=None):
+    if not include_trashed:
+      # Since the Trash folder can have multiple directory levels, we need to check full path and exclude those IDs
+      trashed_ids = [doc.id for doc in docs if Document2.TRASH_DIR in doc.path]
+      docs = docs.exclude(id__in=trashed_ids)
+
+    return docs.defer('description', 'data', 'extra', 'search').distinct().order_by('-last_modified')
+
+
+  def search_documents(self, types=None, search_text=None, order_by=None):
     """
-    Refines a queryset of document objects by type filters, search_text or order_by
-    :param documents: queryset of Document2 objects
+    Search for documents based on type filters, search_text or order_by and return a queryset of document objects
     :param types: list of Document2 types (e.g. - query-hive, directory, etc)
     :param search_text: text to search on in the name and description fields
     :param order_by: order by field (e.g. -last_modified, type)
     """
+    documents = self
+
     if types and isinstance(types, list):
       documents = documents.filter(type__in=types)
 
     if search_text:
-      documents = documents.filter(Q(name__icontains=search_text) | Q(description__icontains=search_text))
+      documents = documents.filter(Q(name__icontains=search_text) | Q(description__icontains=search_text) |
+                                   Q(search__icontains=search_text))
 
     if order_by:  # TODO: Validate that order_by is a valid sort parameter
       documents = documents.order_by(order_by)
 
     return documents
 
+
+class Document2QuerySet(QuerySet, Document2QueryMixin):
+    pass
+
+
+class Document2Manager(models.Manager, Document2QueryMixin):
+
+  def get_query_set(self):
+    return Document2QuerySet(self.model, using=self._db)
+
+  # TODO prevent get() in favor of this
+  def document(self, user, doc_id):
+    return self.documents(user, include_trashed=True, include_history=True).get(id=doc_id)
+
   def get_by_natural_key(self, uuid, version, is_history):
     return self.get(uuid=uuid, version=version, is_history=is_history)
 
-  def get_by_uuid(self, uuid):
+  def get_by_uuid(self, user, uuid, perm_type='read'):
     """
     Since UUID is not a unique field, but part of a composite unique key, this returns the latest version by UUID
     This should always be used in place of Document2.objects.get(uuid=) when a single document is expected
-    WARNING: This does not check for read/write pernissions!
+
+    :param user: User to check permissions against
+    :param uuid
+    :param perm_type: permission type to check against
     """
     docs = self.filter(uuid=uuid).order_by('-last_modified')
+
     if not docs.exists():
       raise FilesystemException(_('Document with UUID %s not found.') % uuid)
-    return docs[0]
+
+    latest_doc = docs[0]
+
+    if perm_type == 'write':
+      latest_doc.can_write_or_exception(user)
+    else:
+      latest_doc.can_read_or_exception(user)
+
+    return latest_doc
 
   def get_history(self, user, doc_type):
     return self.documents(user, perms='owned', include_history=True).filter(type=doc_type, is_history=True)
 
   def get_home_directory(self, user):
     try:
-      return self.get(owner=user, parent_directory=None, name='', type='directory')
+      return self.get(owner=user, parent_directory=None, name=Document2.HOME_DIR, type='directory')
     except Document2.DoesNotExist:
       return self.create_user_directories(user)
 
@@ -843,6 +977,8 @@ class Document2Manager(models.Manager):
         except Document2.MultipleObjectsReturned:
           raise FilesystemException(_('Duplicate documents found for user %s at path: %s') % (user.username, path))
 
+    doc.can_read_or_exception(user)
+
     return doc
 
   def create_user_directories(self, user):
@@ -851,10 +987,10 @@ class Document2Manager(models.Manager):
     :param user: User object
     """
     # Edge-case if the user has a legacy home directory with path-name
-    Directory.objects.filter(name='/', owner=user).update(name='')
+    Directory.objects.filter(name='/', owner=user).update(name=Document2.HOME_DIR)
 
     # Get or create home and Trash directories for all users
-    home_dir, created = Directory.objects.get_or_create(name='', owner=user)
+    home_dir, created = Directory.objects.get_or_create(name=Document2.HOME_DIR, owner=user)
 
     if created:
       LOG.info('Successfully created home directory for user: %s' % user.username)
@@ -877,6 +1013,7 @@ class Document2Manager(models.Manager):
 
 class Document2(models.Model):
 
+  HOME_DIR = ''
   TRASH_DIR = '.Trash'
   EXAMPLES_DIR = 'examples'
 
@@ -888,13 +1025,15 @@ class Document2(models.Model):
 
   data = models.TextField(default='{}')
   extra = models.TextField(default='')
+  search = models.TextField(blank=True, null=True, help_text=_t('Searchable text for the document.'))
   # settings = models.TextField(default='{}') # Owner settings like, can other reshare, can change access
 
   last_modified = models.DateTimeField(auto_now=True, db_index=True, verbose_name=_t('Time last modified'))
   version = models.SmallIntegerField(default=1, verbose_name=_t('Document version'), db_index=True)
   is_history = models.BooleanField(default=False, db_index=True)
+  is_managed = models.BooleanField(default=False, db_index=True, verbose_name=_t('If managed under the cover by Hue and never by the user'))
 
-  dependencies = models.ManyToManyField('self', db_index=True)
+  dependencies = models.ManyToManyField('self', symmetrical=False, related_name='dependents', db_index=True)
 
   parent_directory = models.ForeignKey('self', blank=True, null=True, related_name='children', on_delete=models.CASCADE)
 
@@ -904,10 +1043,10 @@ class Document2(models.Model):
 
   class Meta:
     unique_together = ('uuid', 'version', 'is_history')
-    ordering = ["-last_modified"]
+    ordering = ["-last_modified", "name"]
 
   def __str__(self):
-    res = '%s - %s - %s' % (force_unicode(self.name), self.owner, self.uuid)
+    res = '%s - %s - %s - %s' % (force_unicode(self.name), self.owner, self.type, self.uuid)
     return force_unicode(res)
 
   @property
@@ -934,7 +1073,7 @@ class Document2(models.Model):
 
   @property
   def is_home_directory(self):
-    return self.is_directory and self.parent_directory == None and self.name == ''
+    return self.is_directory and self.parent_directory == None and self.name == self.HOME_DIR
 
   @property
   def is_trash_directory(self):
@@ -962,24 +1101,29 @@ class Document2(models.Model):
     self.data = json.dumps(data_dict)
 
   def get_absolute_url(self):
-    if self.type == 'oozie-coordinator2':
-      return reverse('oozie:edit_coordinator') + '?coordinator=' + str(self.id)
-    elif self.type == 'oozie-bundle2':
-      return reverse('oozie:edit_bundle') + '?bundle=' + str(self.id)
-    elif self.type.startswith('query'):
-      return reverse('notebook:editor') + '?editor=' + str(self.id)
-    elif self.type == 'directory':
-      return '/home2' + '?uuid=' + self.uuid
-    elif self.type == 'notebook':
-      return reverse('notebook:notebook') + '?notebook=' + str(self.id)
-    elif self.type == 'search-dashboard':
-      return reverse('search:index') + '?collection=' + str(self.id)
-    elif self.type == 'link-pigscript':
-      return reverse('pig:index') + '#edit/%s' % self.data_dict.get('object_id', '')
-    elif self.type == 'link-workflow':
-      return '/jobsub/#edit-design/%s' % self.data_dict.get('object_id', '')
-    else:
-      return reverse('oozie:edit_workflow') + '?workflow=' + str(self.id)
+    url = None
+    try:
+      if self.type == 'oozie-coordinator2':
+        url = reverse('oozie:edit_coordinator') + '?coordinator=' + str(self.id)
+      elif self.type == 'oozie-bundle2':
+        url = reverse('oozie:edit_bundle') + '?bundle=' + str(self.id)
+      elif self.type.startswith('query'):
+        url = reverse('notebook:editor') + '?editor=' + str(self.id)
+      elif self.type == 'directory':
+        url = '/home2' + '?uuid=' + self.uuid
+      elif self.type == 'notebook':
+        url = reverse('notebook:notebook') + '?notebook=' + str(self.id)
+      elif self.type == 'search-dashboard':
+        url = reverse('search:index') + '?collection=' + str(self.id)
+      elif self.type == 'link-pigscript':
+        url = reverse('pig:index') + '#edit/%s' % self.data_dict.get('object_id', '')
+      elif self.type == 'link-workflow':
+        url = '/jobsub/#edit-design/%s' % self.data_dict.get('object_id', '')
+      else:
+        url = reverse('oozie:edit_workflow') + '?workflow=' + str(self.id)
+    except NoReverseMatch, e:
+      LOG.warn('Could not perform reverse lookup for type %s, app may be blacklisted.' % self.type)
+    return url
 
   def to_dict(self):
     return {
@@ -990,12 +1134,14 @@ class Document2(models.Model):
       'uuid': self.uuid,
       'id': self.id,
       'doc1_id': self.doc.get().id if self.doc.exists() else -1,
+      'parent_uuid': self.parent_directory.uuid if self.parent_directory else None,
       'type': self.type,
       'perms': self._massage_permissions(),
       'last_modified': self.last_modified.strftime(UTC_TIME_FORMAT),
       'last_modified_ts': calendar.timegm(self.last_modified.utctimetuple()),
+      'is_managed': self.is_managed,
       'isSelected': False,
-      'absoluteUrl': self.get_absolute_url()
+      'absoluteUrl': self.get_absolute_url(),
     }
 
   def get_history(self):
@@ -1027,26 +1173,32 @@ class Document2(models.Model):
 
     super(Document2, self).save(*args, **kwargs)
 
+    # Inherit shared permissions from parent directory, must be done after save b/c new doc needs ID
+    self.inherit_permissions()
+
   def validate(self):
     # Validate document name
     invalid_chars = re.compile(r"[<>/{}[\]~`]");
     if invalid_chars.search(self.name):
       raise FilesystemException(_('Document %s contains an invalid character.') % self.name)
 
-    # If different document with same name and same path (parent) exists, rename current document with datetime
-    if Document2.objects.filter(
-            owner=self.owner,
-            name=self.name,
-            type=self.type,
-            parent_directory=self.parent_directory
-            ).exclude(pk=self.pk).exists():
-        timestamp = str(datetime.now()).split('.', 1)[0]
-        self.name = '%s %s' % (self.name, timestamp)
-
     # Validate home and Trash directories are only created once per user and cannot be created or modified after
-    if self.name in ['', Document2.TRASH_DIR] and \
+    if self.name in [Document2.HOME_DIR, Document2.TRASH_DIR] and self.type == 'directory' and \
           Document2.objects.filter(name=self.name, owner=self.owner, type='directory').exists():
       raise FilesystemException(_('Cannot create or modify directory with name: %s') % self.name)
+
+    # Validate that parent directory does not create cycle
+    if self._contains_cycle():
+      raise FilesystemException(_('Cannot save document %s under parent directory %s due to circular dependency') %
+                                (self.name, self.parent_directory.uuid))
+
+
+  def inherit_permissions(self):
+    if self.parent_directory is not None:
+      parent_perms = Document2Permission.objects.filter(doc=self.parent_directory)
+      for perm in parent_perms:
+        self.share(self.owner, name=perm.perms, users=perm.users.all(), groups=perm.groups.all())
+
 
   def move(self, directory, user):
     if not directory.is_directory:
@@ -1101,7 +1253,14 @@ class Document2(models.Model):
     return self
 
   def update_permission(self, user, name='read', users=None, groups=None):
-    # TODO check in settings if user can sync, re-share, which perms...
+    # Check if user has access to grant permissions
+    if users or groups:
+      if name == 'read':
+        self.can_read_or_exception(user)
+      elif name == 'write':
+        self.can_write_or_exception(user)
+      else:
+        raise ValueError(_('Invalid permission type: %s') % name)
 
     perm, created = Document2Permission.objects.get_or_create(doc=self, perms=name)
 
@@ -1140,7 +1299,7 @@ class Document2(models.Model):
     information like personally identifiable information, that information could be leaked into the Hue database and
     logfiles.
     """
-    if global_redaction_engine.is_enabled() and self.type == 'notebook':
+    if global_redaction_engine.is_enabled() and (self.type == 'notebook' or self.type.startswith('query')):
       data_dict = self.data_dict
       snippets = data_dict.get('snippets', [])
       for snippet in snippets:
@@ -1151,6 +1310,33 @@ class Document2(models.Model):
             snippet['statement'] = global_redaction_engine.redact(snippet['statement'])
             snippet['is_redacted'] = True
       self.data = json.dumps(data_dict)
+      self.search = global_redaction_engine.redact(self.search)
+
+  def _contains_cycle(self):
+    """
+    Uses Floyd's cycle-detection algorithm to detect a cycle (aka Tortoise and Hare)
+    https://en.wikipedia.org/wiki/Cycle_detection#Tortoise_and_hare
+    """
+    slow = self
+    fast = self
+    while True:
+      slow = slow.parent_directory
+      if slow and slow.uuid == self.uuid:
+        slow = self
+
+      if fast.parent_directory is not None:
+        if fast.parent_directory.uuid == self.uuid:
+          fast = self.parent_directory.parent_directory
+        else:
+          fast = fast.parent_directory.parent_directory
+      else:
+        return False
+
+      if slow is None or fast is None:
+        return False
+
+      if slow == fast:
+        return True
 
 
 class DirectoryManager(Document2Manager):
@@ -1171,8 +1357,24 @@ class Directory(Document2):
     """
     Returns the children documents for a given directory, excluding history documents
     """
-    documents = self.children.filter(is_history=False)  # TODO: perms
+    documents = self.children.filter(is_history=False).filter(is_managed=False)  # TODO: perms
     return documents
+
+  def get_children_and_shared_documents(self, user):
+    """
+    Returns the children and shared documents for a given directory, excluding history documents
+    """
+    # Get documents that are direct children, or shared with but not owned by the current user
+    documents = Document2.objects.filter(
+        Q(parent_directory=self) |
+        ( (Q(document2permission__users=user) | Q(document2permission__groups__in=user.groups.all())) &
+          ~Q(owner=user) )
+      )
+
+    documents = documents.exclude(is_history=True).exclude(is_managed=True)
+
+    return documents.defer('description', 'data', 'extra', 'search').distinct().order_by('-last_modified')
+
 
   def save(self, *args, **kwargs):
     self.type = 'directory'
@@ -1240,33 +1442,3 @@ def get_data_link(meta):
     link = '/metastore/table/%(database)s/%(table)s' % meta # Could also add col=val
 
   return link
-
-
-def import_saved_beeswax_query(bquery):
-  design = bquery.get_design()
-
-  return make_notebook(
-      name=bquery.name,
-      description=bquery.desc,
-      editor_type=_convert_type(bquery.type, bquery.data),
-      statement=design.hql_query,
-      status='ready',
-      files=design.file_resources,
-      functions=design.functions,
-      settings=design.settings
-  )
-
-def _convert_type(btype, bdata):
-  from beeswax.models import HQL, IMPALA, RDBMS, SPARK
-
-  if btype == HQL:
-    return 'hive'
-  elif btype == IMPALA:
-    return 'impala'
-  elif btype == RDBMS:
-    data = json.loads(bdata)
-    return data['query']['server']
-  elif btype == SPARK: # We should not import
-    return 'spark'
-  else:
-    return 'hive'

@@ -50,6 +50,10 @@ from beeswax.server.dbms import expand_exception, get_query_server_config, Query
 
 LOG = logging.getLogger(__name__)
 
+# For scraping Job IDs from logs
+HADOOP_JOBS_RE = re.compile("Starting Job = ([a-z0-9_]+?),")
+SPARK_APPLICATION_RE = re.compile("Running with YARN Application = (?P<application_id>application_\d+_\d+)")
+
 
 def index(request):
     return execute_query(request)
@@ -947,6 +951,7 @@ def parse_query_context(context):
     return pair
 
 
+<<<<<<< HEAD
 HADOOP_JOBS_RE = re.compile("Starting Job = ([a-z0-9_]+?),")
 
 
@@ -960,6 +965,40 @@ def _parse_out_hadoop_jobs(log):
         job_id = match.group(1)
         if job_id not in ret:
             ret.append(job_id)
+=======
+def _parse_out_hadoop_jobs(log, engine='mr', with_state=False):
+  """
+  Ideally, Hive would tell us what jobs it has run directly from the Thrift interface.
+
+  with_state: If True, will return a list of dict items with 'job_id', 'started', 'finished'
+  """
+  ret = []
+
+  if engine.lower() == 'mr':
+    start_pattern = HADOOP_JOBS_RE
+  elif engine.lower() == 'spark':
+    start_pattern = SPARK_APPLICATION_RE
+  else:
+    raise ValueError(_('Cannot parse job IDs for execution engine %(engine)s') % {'engine': engine})
+
+  for match in start_pattern.finditer(log):
+    job_id = match.group(1)
+
+    if with_state:
+      if job_id not in list(job['job_id'] for job in ret):
+        ret.append({'job_id': job_id, 'started': True, 'finished': False})
+      end_pattern = 'Ended Job = %s' % job_id
+
+      if end_pattern in log:
+        job = next((job for job in ret if job['job_id'] == job_id), None)
+        if job is not None:
+           job['finished'] = True
+        else:
+          ret.append({'job_id': job_id, 'started': True, 'finished': True})
+    else:
+      if job_id not in ret:
+        ret.append(job_id)
+>>>>>>> 80e29a6018acfdc90d61d5334cc9b5b7b1ad7205
 
     return ret
 
@@ -974,70 +1013,53 @@ def _copy_prefix(prefix, base_dict):
 
 
 def _list_query_history(user, querydict, page_size, prefix=""):
-    """
-    _list_query_history(user, querydict, page_size, prefix) -> (page, filter_param)
+  """
+  _list_query_history(user, querydict, page_size, prefix) -> (page, filter_param)
 
-    A helper to gather the history page. It understands all the GET params in
-    ``list_query_history``, by reading keys from the ``querydict`` with the
-    given ``prefix``.
-    """
-    DEFAULT_SORT = ('-', 'date')  # Descending date
+  A helper to gather the history page. It understands all the GET params in
+  ``list_query_history``, by reading keys from the ``querydict`` with the
+  given ``prefix``.
+  """
+  DEFAULT_SORT = ('-', 'date')                  # Descending date
 
-    SORT_ATTR_TRANSLATION = dict(
-        date='submission_date',
-        state='last_state',
-        name='design__name',
-        type='design__type',
-    )
+  SORT_ATTR_TRANSLATION = dict(
+    date='submission_date',
+    state='last_state',
+    name='design__name',
+    type='design__type',
+  )
 
-    db_queryset = models.QueryHistory.objects.select_related()
+  db_queryset = models.QueryHistory.objects.select_related()
 
-    # Filtering
-    #
-    # Queries without designs are the ones we submitted on behalf of the user,
-    # (e.g. view table data). Exclude those when returning query history.
-    if querydict.get(prefix + 'auto_query', 'on') != 'on':
-        db_queryset = db_queryset.exclude(design__isnull=False, design__is_auto=True)
+  # Filtering
+  #
+  # Queries without designs are the ones we submitted on behalf of the user,
+  # (e.g. view table data). Exclude those when returning query history.
+  if querydict.get(prefix + 'auto_query', 'on') != 'on':
+    db_queryset = db_queryset.exclude(design__isnull=False, design__is_auto=True)
 
-    user_filter = querydict.get(prefix + 'user', user.username)
-    if user_filter != ':all':
-        db_queryset = db_queryset.filter(owner__username=user_filter)
+  user_filter = querydict.get(prefix + 'user', user.username)
+  if user_filter != ':all':
+    db_queryset = db_queryset.filter(owner__username=user_filter)
 
-    # Design id
-    design_id = querydict.get(prefix + 'design_id')
-    if design_id:
-        db_queryset = db_queryset.filter(design__id=int(design_id))
+  # Design id
+  design_id = querydict.get(prefix + 'design_id')
+  if design_id:
+    if design_id.isdigit():
+      db_queryset = db_queryset.filter(design__id=int(design_id))
+    else:
+      raise PopupException(_('list_query_history requires design_id parameter to be an integer: %s') % design_id)
 
-    # Search
-    search_filter = querydict.get(prefix + 'search')
-    if search_filter:
-        db_queryset = db_queryset.filter(
-            Q(design__name__icontains=search_filter) | Q(query__icontains=search_filter) | Q(
-                owner__username__icontains=search_filter))
+  # Search
+  search_filter = querydict.get(prefix + 'search')
+  if search_filter:
+    db_queryset = db_queryset.filter(Q(design__name__icontains=search_filter) | Q(query__icontains=search_filter) | Q(owner__username__icontains=search_filter))
 
-    # Design type
-    d_type = querydict.get(prefix + 'type')
-    if d_type:
-        if d_type not in SavedQuery.TYPES_MAPPING.keys():
-            LOG.warn('Bad parameter to list_query_history: type=%s' % (d_type,))
-        else:
-            db_queryset = db_queryset.filter(design__type=SavedQuery.TYPES_MAPPING[d_type])
-
-    # If recent query
-    recent = querydict.get('recent')
-    if recent:
-        db_queryset = db_queryset.filter(is_cleared=False)
-
-    # Ordering
-    sort_key = querydict.get(prefix + 'sort')
-    if sort_key:
-        sort_dir, sort_attr = '', sort_key
-        if sort_key[0] == '-':
-            sort_dir, sort_attr = '-', sort_key[1:]
-
-        if not SORT_ATTR_TRANSLATION.has_key(sort_attr):
-            LOG.warn('Bad parameter to list_query_history: sort=%s' % (sort_key,))
-            sort_dir, sort_attr = DEFAULT_SORT
+  # Design type
+  d_type = querydict.get(prefix + 'type')
+  if d_type:
+    if d_type not in SavedQuery.TYPES_MAPPING.keys():
+      LOG.warn('Bad parameter to list_query_history: type=%s' % (d_type,))
     else:
         sort_dir, sort_attr = DEFAULT_SORT
     db_queryset = db_queryset.order_by(sort_dir + SORT_ATTR_TRANSLATION[sort_attr], '-id')

@@ -29,11 +29,11 @@ from guppy import hpy
 
 from django.utils.translation import ugettext_lazy as _
 
-import desktop.conf
-import desktop.log
 import desktop.redaction
 from desktop.lib.paths import get_desktop_root
 from desktop.lib.python_util import force_dict_to_strings
+
+from aws.conf import is_default_configured as is_s3_enabled
 
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
@@ -150,7 +150,9 @@ MIDDLEWARE_CLASSES = [
     'django.middleware.locale.LocaleMiddleware',
     'babeldjango.middleware.LocaleMiddleware',
     'desktop.middleware.AjaxMiddleware',
+    'django.middleware.security.SecurityMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'desktop.middleware.ContentSecurityPolicyMiddleware',
     # Must be after Session, Auth, and Ajax. Before everything else.
     'desktop.middleware.LoginAndPermissionMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -248,19 +250,12 @@ BOWER_INSTALLED_APPS = (
 # of having multiple apps.  If your app needs
 # to store data related to users, it should
 # manage its own table with an appropriate foreign key.
-AUTH_PROFILE_MODULE=None
+AUTH_PROFILE_MODULE = None
 
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/" # For djangosaml2 bug.
 
 PYLINTRC = get_desktop_root('.pylintrc')
-
-# Insert our HDFS upload handler
-FILE_UPLOAD_HANDLERS = (
-  'hadoop.fs.upload.HDFSfileUploadHandler',
-  'django.core.files.uploadhandler.MemoryFileUploadHandler',
-  'django.core.files.uploadhandler.TemporaryFileUploadHandler',
-)
 
 # Custom CSRF Failure View
 CSRF_FAILURE_VIEW = 'desktop.views.csrf_failure'
@@ -382,6 +377,16 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = desktop.conf.SESSION.EXPIRE_AT_BROWSER_CLOSE.g
 # HTTP only
 SESSION_COOKIE_HTTPONLY = desktop.conf.SESSION.HTTP_ONLY.get()
 
+CSRF_COOKIE_SECURE = desktop.conf.SESSION.SECURE.get()
+
+SECURE_HSTS_SECONDS = desktop.conf.SECURE_HSTS_SECONDS.get()
+SECURE_HSTS_INCLUDE_SUBDOMAINS = desktop.conf.SECURE_HSTS_INCLUDE_SUBDOMAINS.get()
+SECURE_CONTENT_TYPE_NOSNIFF = desktop.conf.SECURE_CONTENT_TYPE_NOSNIFF.get()
+SECURE_BROWSER_XSS_FILTER = desktop.conf.SECURE_BROWSER_XSS_FILTER.get()
+SECURE_SSL_REDIRECT = desktop.conf.SECURE_SSL_REDIRECT.get()
+SECURE_SSL_HOST = desktop.conf.SECURE_SSL_HOST.get()
+SECURE_REDIRECT_EXEMPT = desktop.conf.SECURE_REDIRECT_EXEMPT.get()
+
 # django-nose test specifics
 TEST_RUNNER = 'desktop.lib.test_runners.HueTestRunner'
 # Turn off cache middleware
@@ -421,7 +426,7 @@ else:
 AXES_LOGIN_FAILURE_LIMIT = desktop.conf.AUTH.LOGIN_FAILURE_LIMIT.get()
 AXES_LOCK_OUT_AT_FAILURE = desktop.conf.AUTH.LOGIN_LOCK_OUT_AT_FAILURE.get()
 AXES_COOLOFF_TIME = desktop.conf.AUTH.LOGIN_COOLOFF_TIME.get()
-AXES_USE_USER_AGENT = desktop.conf.AUTH.LOGIN_LOCK_OUT_BY_COMBINATION_BROWSER_USER_AGENT_AND_IP.get()
+AXES_USE_USER_AGENT = desktop.conf.AUTH.LOGIN_LOCK_OUT_USE_USER_AGENT.get()
 AXES_LOCK_OUT_BY_COMBINATION_USER_AND_IP = desktop.conf.AUTH.LOGIN_LOCK_OUT_BY_COMBINATION_USER_AND_IP.get()
 
 # SAML
@@ -460,11 +465,28 @@ USE_X_FORWARDED_HOST = desktop.conf.USE_X_FORWARDED_HOST.get()
 
 # Support HTTPS load-balancing
 if desktop.conf.SECURE_PROXY_SSL_HEADER.get():
-  SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTOCOL', 'https')
+  SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Add last activity tracking and idle session timeout
 if 'useradmin' in [app.name for app in appmanager.DESKTOP_APPS]:
   MIDDLEWARE_CLASSES.append('useradmin.middleware.LastActivityMiddleware')
+
+################################################################
+# Register file upload handlers
+# This section must go after the desktop lib modules are loaded
+################################################################
+
+# Insert our custom upload handlers
+file_upload_handlers = [
+    'hadoop.fs.upload.HDFSfileUploadHandler',
+    'django.core.files.uploadhandler.MemoryFileUploadHandler',
+    'django.core.files.uploadhandler.TemporaryFileUploadHandler',
+]
+
+if is_s3_enabled():
+  file_upload_handlers.insert(0, 'aws.s3.upload.S3FileUploadHandler')
+
+FILE_UPLOAD_HANDLERS = tuple(file_upload_handlers)
 
 ############################################################
 
@@ -474,6 +496,8 @@ SKIP_SOUTH_TESTS = True
 # Set up environment variable so Kerberos libraries look at our private
 # ticket cache
 os.environ['KRB5CCNAME'] = desktop.conf.KERBEROS.CCACHE_PATH.get()
+if not os.getenv('SERVER_SOFTWARE'):
+  os.environ['SERVER_SOFTWARE'] = 'apache'
 
 # If Hue is configured to use a CACERTS truststore, make sure that the
 # REQUESTS_CA_BUNDLE is set so that we can use it when we make external requests.

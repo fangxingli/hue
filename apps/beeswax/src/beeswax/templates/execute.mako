@@ -17,7 +17,9 @@
   from desktop.lib.django_util import extract_field_data
   from desktop.views import commonheader, commonfooter, commonshare, _ko
   from beeswax import conf as beeswax_conf
+  from desktop import conf
   from django.utils.translation import ugettext as _
+  from notebook.conf import ENABLE_QUERY_BUILDER
 %>
 
 <%namespace name="comps" file="beeswax_components.mako" />
@@ -67,7 +69,7 @@ ${ layout.menubar(section='query') }
       </div>
       <div class="tab-pane" id="settingsTab">
         <div class="card card-small card-tab">
-          <div class="card-body">
+          <div class="card-body" style="overflow-y: auto; height: 100%;">
             <div id="advanced-settings">
             <form id="advancedSettingsForm" action="" method="POST" class="form form-horizontal">
                 ${ csrf_token(request) | n,unicode }
@@ -267,14 +269,18 @@ ${ layout.menubar(section='query') }
                data-original-title="${ _('Query name') }"
                data-placement="right">
             </a>
-            <a href="javascript:void(0);"
-               id="query-description"
-               data-type="textarea"
-               data-name="description"
-               data-value="${design.desc}"
-               data-original-title="${ _('Query description') }"
-               data-placement="right" style="font-size: 14px; margin-left: 10px">
-            </a>
+            <br />
+            <div style="display: inline-block; margin: 0 10px 0 46px; line-height: 20px; ">
+              <a href="javascript:void(0);"
+                 id="query-description"
+                 data-type="textarea"
+                 data-name="description"
+                 data-value="${design.desc}"
+                 data-original-title="${ _('Query description') }"
+                 data-placement="bottom"
+                 style="font-size: 14px; line-height: 20px; white-space: normal; " >
+              </a>
+            </div>
           </h1>
           %endif
       </div>
@@ -355,6 +361,9 @@ ${ layout.menubar(section='query') }
         <ul class="nav nav-tabs">
           <li class="active recentLi"><a href="#recentTab" data-toggle="tab">${_('Recent queries')}</a></li>
           <li><a href="#query" data-toggle="tab">${_('Query')}</a></li>
+          %if ENABLE_QUERY_BUILDER.get():
+          <li><a href="#queryBuilderTab" data-toggle="tab">${_('Query builder')}</a></li>
+          %endif
           <!-- ko if: !design.explain() -->
           <li><a href="#log" data-toggle="tab">${_('Log')}</a></li>
           <!-- /ko -->
@@ -391,6 +400,24 @@ ${ layout.menubar(section='query') }
             <pre data-bind="visible: viewModel.design.statement() == ''">${_('There is currently no query to visualize.')}</pre>
             <pre data-bind="visible: viewModel.design.statement() != '', text: viewModel.design.statement()"></pre>
           </div>
+          %if ENABLE_QUERY_BUILDER.get():
+          <div class="tab-pane" id="queryBuilderTab">
+            <div id="queryBuilderAlert" style="display: none" class="alert">${ _('There are currently no rules defined. To get started, right click on any table column in the SQL Assist panel.') }</div>
+            <table id="queryBuilder" class="table table-condensed">
+              <thead>
+                <tr>
+                  <th width="10%">${ _('Table') }</th>
+                  <th>${ _('Column') }</th>
+                  <th width="10%">${ _('Operation') }</th>
+                  <th width="1%">&nbsp;</th>
+                </tr>
+              </thead>
+            </table>
+            <div class="button-panel">
+              <button class="btn btn-primary disable-feedback" onclick="generateQuery()">${_('Build query')}</button>
+            </div>
+          </div>
+          %endif
 
           <!-- ko if: design.explain() -->
           <div class="tab-pane" id="explanation">
@@ -751,8 +778,26 @@ ${ layout.menubar(section='query') }
   </div>
 </div>
 
+%if ENABLE_QUERY_BUILDER.get():
+<div id="invalidQueryBuilder" class="modal hide fade">
+  <div class="modal-header">
+    <a href="#" class="close" data-dismiss="modal">&times;</a>
+    <h3>${_('Invalid Query')}</h3>
+  </div>
+  <div class="modal-body">
+    <p>${_('Query requires a select or an aggregate.')}</p>
+  </div>
+  <div class="modal-footer">
+    <a class="btn" data-dismiss="modal">${_('Close')}</a>
+  </div>
+</div>
+%endif
 
 ${ commonshare() | n,unicode }
+
+<script>
+  var SqlAutocompleter2 = {};
+</script>
 
 <script src="${ static('desktop/js/hue.json.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/jquery.huedatatable.js') }" type="text/javascript" charset="utf-8"></script>
@@ -764,16 +809,55 @@ ${ commonshare() | n,unicode }
 <script src="${ static('desktop/js/sqlAutocompleter.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/hdfsAutocompleter.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/assist/tableStats.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/js/assist/assistHelper.js') }" type="text/javascript" charset="utf-8"></script>
+<script src="${ static('desktop/js/apiHelper.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/assist/assistHdfsEntry.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/assist/assistDbEntry.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/assist/assistDbSource.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/fileBrowser/hueFileEntry.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/autocompleter.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('notebook/js/notebook.ko.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('beeswax/js/beeswax.vm.js') }"></script>
 <script src="${ static('desktop/js/share.vm.js') }"></script>
 <script src="${ static('desktop/js/vkbeautify.js') }" type="text/javascript" charset="utf-8"></script>
+%if ENABLE_QUERY_BUILDER.get():
+<!-- For query builder -->
+<link rel="stylesheet" href="${ static('desktop/ext/css/jquery.contextMenu.min.css') }">
+<link rel="stylesheet" href="${ static('desktop/css/queryBuilder.css') }">
+<script src="${ static('desktop/ext/js/jquery/plugins/jquery.contextMenu.min.js') }"></script>
+<script src="${ static('desktop/ext/js/jquery/plugins/jquery.ui.position.min.js') }"></script>
+<script src="${ static('desktop/js/queryBuilder.js') }"></script>
+<script>
+  // query-builder-menu is the class to use
+  // Callback will run after each rule add, just focus to the queryBuilder tab
+  QueryBuilder.bindMenu('.query-builder-menu', function () {
+    $("a[href='#queryBuilderTab']").click();
+  });
+  function generateQuery() {
+    var result = QueryBuilder.buildHiveQuery();
+    if (result.status == "fail") {
+      $("#invalidQueryBuilder").modal("show");
+    } else {
+      codeMirror.setValue(result.query);
+      codeMirror.focus();
+    }
+  }
+
+  window.setInterval(function(){
+    if ($('#queryBuilder tbody').length > 0 && $('#queryBuilder tbody').find('tr').length > 0){
+      $('.button-panel').show();
+      $('#queryBuilder').show();
+      $('#queryBuilderAlert').hide();
+    }
+    else {
+      $('.button-panel').hide();
+      $('#queryBuilder').hide();
+      $('#queryBuilderAlert').show();
+    }
+  }, 500);
+
+</script>
+
+<!-- End query builder imports -->
+%endif
 
 <script src="${ static('desktop/ext/js/codemirror-3.11.js') }"></script>
 <link rel="stylesheet" href="${ static('desktop/ext/css/codemirror.css') }">
@@ -787,7 +871,6 @@ ${ commonshare() | n,unicode }
 
 <link href="${ static('desktop/ext/css/bootstrap-editable.css') }" rel="stylesheet">
 <script src="${ static('desktop/ext/js/bootstrap-editable.min.js') }"></script>
-<script src="${ static('desktop/ext/js/moment-with-locales.min.js') }"></script>
 
 <script src="${ static('beeswax/js/stats.utils.js') }"></script>
 
@@ -809,11 +892,23 @@ ${ tableStats.tableStats() }
   }
 
   .left-panel {
-    position: absolute;
+    position: fixed !important;
+    z-index: 1030;
+    outline: none !important;
+  }
+
+  .mega-popover .popover-content {
+    min-height: 190px !important;
+  }
+
+  .mega-popover .content {
+    height: auto !important;
+    max-height: 280px;
   }
 
   .resizer {
-    position: absolute;
+    position: fixed !important;
+    margin-left: 15px;
     width: 20px;
     text-align: center;
     z-index: 1000;
@@ -827,6 +922,7 @@ ${ tableStats.tableStats() }
 
   .right-panel {
     position: absolute;
+    outline: none !important;
   }
 
   #chooseFile, #chooseFolder, #choosePath {
@@ -1054,7 +1150,6 @@ ${ tableStats.tableStats() }
   .query-right-actions h4 {
     padding: 0 10px;
   }
-
 </style>
 
 <link rel="stylesheet" href="${ static('desktop/ext/css/hue-filetypes.css') }">
@@ -1103,19 +1198,39 @@ editorViewModelOptions.languages.push({
 
 var i18n = {
   errorLoadingDatabases: "${ _('There was a problem loading the databases') }"
-}
+};
 
-var editorViewModel = new EditorViewModel([], editorViewModelOptions, i18n);
-var notebook = editorViewModel.newNotebook();
-var snippet = notebook.newSnippet(snippetType);
-var assistHelper = snippet.getAssistHelper();
+var apiHelper = ApiHelper.getInstance({
+  user: HIVE_AUTOCOMPLETE_USER,
+  i18n: i18n
+});
+
+var editorViewModel = {
+  sqlSourceTypes: [{
+    type: snippetType,
+    name: HIVE_AUTOCOMPLETE_APP == "impala" ? "Impala" : "Hive"
+  }]
+};
+
+var snippet = {
+  type: ko.observable(snippetType),
+  isSqlDialect: ko.observable(true),
+  getApiHelper: function() {
+    return apiHelper;
+  },
+  database: ko.observable()
+};
+
 var autocompleter = new Autocompleter({
   snippet: snippet,
   user: HIVE_AUTOCOMPLETE_USER,
-  oldEditor: true
+  oldEditor: true,
+  optEnabled: false,
+  timeout: ${ conf.EDITOR_AUTOCOMPLETE_TIMEOUT.get() },
+  useNewAutocompleter: false
 });
 
-var totalStorageUserPrefix = assistHelper.getTotalStorageUserPrefix(snippetType);
+var totalStorageUserPrefix = apiHelper.getTotalStorageUserPrefix(snippetType);
 
 var escapeOutput = function (str) {
   return $('<span>').text(str).html().trim();
@@ -1155,14 +1270,16 @@ function placeResizePanelHandle() {
 function reinitializeTableExtenders() {
   if (viewModel.design.results.columns().length > 0 && viewModel.design.results.columns().length < 500) {
     $("#resultTable").jHueTableExtender({
-       fixedHeader: true,
-       fixedFirstColumn: true,
-       includeNavigator: false
+      fixedHeader: true,
+      fixedFirstColumn: true,
+      includeNavigator: false,
+      clonedContainerPosition: "absolute"
     });
   }
   $("#recentQueries").jHueTableExtender({
-     fixedHeader: true,
-     includeNavigator: false
+    fixedHeader: true,
+    includeNavigator: false,
+    clonedContainerPosition: "absolute"
   });
 }
 var CURRENT_CODEMIRROR_SIZE = 100;
@@ -1172,6 +1289,7 @@ var INITIAL_HORIZONTAL_RESIZE_POSITION = -1;
 
 // Navigator, recent queries
 $(document).ready(function () {
+  $(document).on('click', '.assist-table .fa-list', function(){ $('.modal-backdrop').before($('#assistQuickLook')) });
   $("#resizePanel a").draggable({
     axis: "y",
     start: function (e, ui) {
@@ -1212,7 +1330,7 @@ $(document).ready(function () {
 
   function draggableHelper(el, e, ui) {
     resizeCodeMirror(el);
-    var minHandlePosition = $('.card-heading.simple').is(':visible') ? 248 : 205;
+    var minHandlePosition = $('.card-heading.simple').is(':visible') ? $('.card-heading.simple').outerHeight() + 205 : 205;
     if (ui.position.top < minHandlePosition) {
       ui.position.top = minHandlePosition;
     }
@@ -1251,8 +1369,6 @@ $(document).ready(function () {
     $("#recentLoader").show();
     $("#recentQueries").hide();
     recentQueries.fnClearTable();
-    var locale = window.navigator.userLanguage || window.navigator.language;
-    moment.locale(locale);
     $.getJSON("${ url(app_name + ':list_query_history') }?format=json&recent=true", function(data) {
       if (data && data.queries) {
         var _rows = [];
@@ -1299,7 +1415,7 @@ $(document).ready(function () {
     });
   });
 
-  var lastWindowHeight = -1
+  var lastWindowHeight = -1;
   var resizeNavigator = function () {
     var newHeight = $(window).height();
     if (lastWindowHeight !== newHeight) {
@@ -1673,7 +1789,7 @@ $(document).ready(function () {
         CURRENT_CODEMIRROR_SIZE = 270;
         if ($('.card-heading.simple').is(':visible')) {
           INITIAL_CODEMIRROR_SIZE = 270;
-          INITIAL_HORIZONTAL_RESIZE_POSITION = 418;
+          INITIAL_HORIZONTAL_RESIZE_POSITION = $('.card-heading.simple').outerHeight() + 374;
         }
         codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
         reinitializeTableExtenders();
@@ -2735,11 +2851,30 @@ function setupCodeMirrorSubscription() {
 }
 
 // Knockout
-viewModel = new BeeswaxViewModel("${app_name}", assistHelper);
+viewModel = new BeeswaxViewModel("${app_name}", apiHelper);
 ko.applyBindings(viewModel, $("#beeswax-execute")[0]);
+
+var handleAssistSelection = function (databaseDef) {
+  if (databaseDef.source === snippetType && snippet.database() !== databaseDef.name) {
+    snippet.database(databaseDef.name);
+  }
+};
+
+huePubSub.subscribe("assist.database.set", handleAssistSelection);
+huePubSub.subscribe("assist.database.selected", handleAssistSelection);
+
+if (! snippet.database()) {
+  huePubSub.publish("assist.get.database", snippetType);
+}
 
 shareViewModel = initSharing("#documentShareModal");
 shareViewModel.setDocId(${doc_id});
+
+$('.left-panel').on('mousewheel', function(e){
+  e.preventDefault();
+  e.stopPropagation();
+  return false;
+});
 
 % if not beeswax_conf.USE_GET_LOG_API.get() and app_name != 'impala':
   viewModel.shouldAppendLogs = true;

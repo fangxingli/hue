@@ -17,14 +17,14 @@
 # limitations under the License.
 
 import json
-import re
 
 from nose.tools import assert_equal, assert_false, assert_true
 from django.contrib.auth.models import User
 
 from desktop.lib.django_test_util import make_logged_in_client
 from desktop.lib.test_utils import grant_access
-from desktop.models import import_saved_beeswax_query, Directory, Document2
+from desktop.models import Directory, Document2
+from notebook.models import import_saved_beeswax_query
 
 from beeswax.models import SavedQuery
 from beeswax.design import hql_query
@@ -100,7 +100,7 @@ class TestDocument2(object):
     assert_true('not found' in data['message'])
 
 
-  def test_directory_create(self):
+  def test_directory_create_and_rename(self):
     response = self.client.post('/desktop/api2/doc/mkdir', {'parent_uuid': json.dumps(self.home_dir.uuid), 'name': json.dumps('test_mkdir')})
     data = json.loads(response.content)
 
@@ -108,6 +108,13 @@ class TestDocument2(object):
     assert_true('directory' in data)
     assert_equal(data['directory']['name'], 'test_mkdir', data)
     assert_equal(data['directory']['type'], 'directory', data)
+
+    response = self.client.post('/desktop/api2/doc/update', {'uuid': json.dumps(data['directory']['uuid']),
+                                                             'name': 'updated'})
+
+    data = json.loads(response.content)
+    assert_equal(0, data['status'])
+    assert_equal('updated', data['document']['name'], data)
 
 
   def test_file_move(self):
@@ -176,8 +183,8 @@ class TestDocument2(object):
     # Creates 2 directories and 2 queries and saves to home directory
     dir1 = Directory.objects.create(name='test_dir1', owner=self.user)
     dir2 = Directory.objects.create(name='test_dir2', owner=self.user)
-    query1 = Document2.objects.create(name='query1.sql', type='query-hive', owner=self.user, data={})
-    query2 = Document2.objects.create(name='query2.sql', type='query-hive', owner=self.user, data={})
+    query1 = Document2.objects.create(name='query1.sql', type='query-hive', owner=self.user, data={}, search='foobar')
+    query2 = Document2.objects.create(name='query2.sql', type='query-hive', owner=self.user, data={}, search='barfoo')
     children = [dir1, dir2, query1, query2]
 
     self.home_dir.children.add(*children)
@@ -196,11 +203,14 @@ class TestDocument2(object):
     assert_true(all(doc['type'] == 'directory' for doc in data['children']))
 
     # Test search text
-    response = self.client.get('/desktop/api2/doc', {'path': '/', 'text': 'query'})
+    response = self.client.get('/desktop/api2/doc', {'path': '/', 'text': 'foo'})
     data = json.loads(response.content)
-    assert_equal('query', data['text'])
+    assert_equal('foo', data['text'])
     assert_equal(2, data['count'])
-    assert_true(all('query' in doc['name'] for doc in data['children']))
+
+    response = self.client.get('/desktop/api2/doc', {'path': '/', 'text': 'foobar'})
+    data = json.loads(response.content)
+    assert_equal(1, data['count'])
 
     # Test pagination with limit
     response = self.client.get('/desktop/api2/doc', {'path': '/', 'page': 2, 'limit': 2})
@@ -302,23 +312,6 @@ class TestDocument2(object):
     assert_true('invalid character' in data['message'])
 
 
-  def test_validate_same_name_and_path(self):
-    # Test that creating a document with the same name at the same path will auto-rename the document
-    test_dir = Directory.objects.create(name='test_dir', owner=self.user, parent_directory=self.home_dir)
-    response = self.client.post('/desktop/api2/doc/mkdir', {'parent_uuid': json.dumps(self.home_dir.uuid), 'name': json.dumps('test_dir')})
-    data = json.loads(response.content)
-    assert_equal(0, data['status'], data)
-
-    pattern = re.compile("test_dir \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
-    assert_true(pattern.match(data['directory']['name']), data)
-
-    # But can create same name in different location
-    response = self.client.post('/desktop/api2/doc/mkdir', {'parent_uuid': json.dumps(test_dir.uuid), 'name': json.dumps('test_dir')})
-    data = json.loads(response.content)
-    assert_equal(0, data['status'], data)
-    assert_equal('test_dir', data['directory']['name'])
-
-
   def test_validate_immutable_user_directories(self):
     # Test that home and Trash directories cannot be recreated or modified
     test_dir = Directory.objects.create(name='test_dir', owner=self.user, parent_directory=self.home_dir)
@@ -343,6 +336,46 @@ class TestDocument2(object):
     data = json.loads(response.content)
     assert_equal(-1, data['status'], data)
     assert_equal('Cannot create or modify directory with name: .Trash', data['message'])
+
+
+  def test_validate_circular_directory(self):
+    # Test that saving a document with cycle raises an error, i.e. - This should fail:
+    # a.parent_directory = b
+    # b.parent_directory = c
+    # c.parent_directory = a
+    c_dir = Directory.objects.create(name='c', owner=self.user)
+    b_dir = Directory.objects.create(name='b', owner=self.user, parent_directory=c_dir)
+    a_dir = Directory.objects.create(name='a', owner=self.user, parent_directory=b_dir)
+    response = self.client.post('/desktop/api2/doc/move', {
+        'source_doc_uuid': json.dumps(c_dir.uuid),
+        'destination_doc_uuid': json.dumps(a_dir.uuid)
+    })
+    data = json.loads(response.content)
+    assert_equal(-1, data['status'], data)
+    assert_true('circular dependency' in data['message'], data)
+
+
+  def test_api_get_data(self):
+    doc_data = {'info': 'hello', 'is_history': False}
+    doc = Document2.objects.create(name='query1.sql', type='query-hive', owner=self.user, data=json.dumps(doc_data))
+    doc_data.update({'id': doc.id, 'uuid': doc.uuid})
+
+    response = self.client.get('/desktop/api2/doc/', {
+        'uuid': doc.uuid,
+    })
+    data = json.loads(response.content)
+
+    assert_true('document' in data, data)
+    assert_false(data['data'], data)
+
+    response = self.client.get('/desktop/api2/doc/', {
+        'uuid': doc.uuid,
+        'data': 'true'
+    })
+    data = json.loads(response.content)
+
+    assert_true('data' in data, data)
+    assert_equal(data['data'], doc_data)
 
 
 class TestDocument2Permissions(object):
@@ -420,6 +453,42 @@ class TestDocument2Permissions(object):
     response = self.client_not_me.get('/desktop/api2/doc/', {'uuid': doc.uuid})
     data = json.loads(response.content)
     assert_equal(doc.uuid, data['document']['uuid'], data)
+
+    # other user can share document with read permissions
+    response = self.client_not_me.post("/desktop/api2/doc/share", {
+      'uuid': json.dumps(doc.uuid),
+      'data': json.dumps({
+        'read': {
+          'user_ids': [],
+          'group_ids': [
+            self.default_group.id
+          ],
+        },
+        'write': {
+          'user_ids': [],
+          'group_ids': [],
+        }
+      })
+    })
+    assert_equal(0, json.loads(response.content)['status'], response.content)
+
+    # other user cannot share document with write permissions
+    response = self.client_not_me.post("/desktop/api2/doc/share", {
+      'uuid': json.dumps(doc.uuid),
+      'data': json.dumps({
+        'read': {
+          'user_ids': [],
+          'group_ids': [],
+        },
+        'write': {
+          'user_ids': [],
+          'group_ids': [
+            self.default_group.id
+          ],
+        }
+      })
+    })
+    assert_equal(-1, json.loads(response.content)['status'], response.content)
 
 
   def test_share_document_read_by_group(self):
@@ -606,12 +675,12 @@ class TestDocument2Permissions(object):
     assert_true('query3.sql' in doc_names)
     assert_false('query1.sql' in doc_names)
 
-    # they should not appear in the other user's regular get_documents response
+    # they should also appear in user's home directory get_documents response
     response = self.client_not_me.get('/desktop/api2/doc/')
     data = json.loads(response.content)
     doc_names = [doc['name'] for doc in data['children']]
-    assert_false('query2.sql' in doc_names)
-    assert_false('query3.sql' in doc_names)
+    assert_true('query2.sql' in doc_names)
+    assert_true('query3.sql' in doc_names)
 
 
   def test_get_shared_directories(self):
@@ -660,6 +729,24 @@ class TestDocument2Permissions(object):
     assert_equal(doc2.uuid, data['document']['uuid'], data)
 
 
+  def test_inherit_parent_permissions(self):
+    # Tests that when saving a document to a shared directory, the doc/dir inherits same permissions
+
+    dir1 = Directory.objects.create(name='dir1', owner=self.user, parent_directory=self.home_dir)
+
+    dir1.share(user=self.user, name='read', users=[], groups=[self.default_group])
+    dir1.share(user=self.user, name='write', users=[self.user_not_me], groups=[])
+
+    doc1 = Document2.objects.create(name='doc1', owner=self.user, parent_directory=dir1)
+
+    response = self.client.get('/desktop/api2/doc/', {'uuid': doc1.uuid})
+    data = json.loads(response.content)
+    assert_equal([{'id': self.default_group.id, 'name': self.default_group.name}],
+                 data['document']['perms']['read']['groups'], data)
+    assert_equal([{'id': self.user_not_me.id, 'username': self.user_not_me.username}],
+                 data['document']['perms']['write']['users'], data)
+
+
   def test_search_documents(self):
     owned_dir = Directory.objects.create(name='test_dir', owner=self.user, parent_directory=self.home_dir)
     owned_query = Document2.objects.create(name='query1.sql', type='query-hive', owner=self.user, data={}, parent_directory=owned_dir)
@@ -691,3 +778,148 @@ class TestDocument2Permissions(object):
     assert_equal(4, data['count'])
     doc_names = [doc['name'] for doc in data['documents']]
     assert_true('history.sql' in doc_names)
+
+
+class TestDocument2ImportExport(object):
+
+  def setUp(self):
+    self.client = make_logged_in_client(username="perm_user", groupname="default", recreate=True, is_superuser=False)
+    self.client_not_me = make_logged_in_client(username="not_perm_user", groupname="default", recreate=True, is_superuser=False)
+
+    self.user = User.objects.get(username="perm_user")
+    self.user_not_me = User.objects.get(username="not_perm_user")
+
+    grant_access(self.user.username, self.user.username, "desktop")
+    grant_access(self.user_not_me.username, self.user_not_me.username, "desktop")
+
+    self.default_group = get_default_user_group()
+
+    # This creates the user directories for the new user
+    response = self.client.get('/desktop/api2/doc/')
+    data = json.loads(response.content)
+    assert_equal('/', data['document']['path'], data)
+
+    self.home_dir = Document2.objects.get_home_directory(user=self.user)
+    self.not_me_home_dir = Document2.objects.get_home_directory(user=self.user_not_me)
+
+  def test_export_documents_with_dependencies(self):
+    query1 = Document2.objects.create(name='query1.sql', type='query-hive', owner=self.user, data={}, parent_directory=self.home_dir)
+    query2 = Document2.objects.create(name='query2.sql', type='query-hive', owner=self.user, data={}, parent_directory=self.home_dir)
+    query3 = Document2.objects.create(name='query3.sql', type='query-hive', owner=self.user, data={}, parent_directory=self.home_dir, is_history=True)
+    workflow = Document2.objects.create(name='test.wf', type='oozie-workflow2', owner=self.user, data={}, parent_directory=self.home_dir)
+    workflow.dependencies.add(query1)
+    workflow.dependencies.add(query2)
+    workflow.dependencies.add(query3)
+
+    # Test that exporting workflow should export all dependencies except history
+    response = self.client.get('/desktop/api2/doc/export/', {'documents': json.dumps([workflow.id]), 'format': 'json'})
+    documents = json.loads(response.content)
+    documents = json.loads(documents)
+
+    assert_equal(3, len(documents))
+    assert_true('test.wf' in [doc['fields']['name'] for doc in documents])
+    assert_true('query1.sql' in [doc['fields']['name'] for doc in documents])
+    assert_true('query2.sql' in [doc['fields']['name'] for doc in documents])
+    assert_false('query3.sql' in [doc['fields']['name'] for doc in documents])
+
+    # Test that exporting multiple workflows with overlapping dependencies works
+    workflow2 = Document2.objects.create(name='test2.wf', type='oozie-workflow2', owner=self.user, data={}, parent_directory=self.home_dir)
+    workflow2.dependencies.add(query1)
+
+    response = self.client.get('/desktop/api2/doc/export/', {'documents': json.dumps([workflow.id, workflow2.id]), 'format': 'json'})
+    documents = json.loads(response.content)
+    documents = json.loads(documents)
+
+    assert_equal(4, len(documents))
+    assert_true('test.wf' in [doc['fields']['name'] for doc in documents])
+    assert_true('test2.wf' in [doc['fields']['name'] for doc in documents])
+    assert_true('query1.sql' in [doc['fields']['name'] for doc in documents])
+    assert_true('query2.sql' in [doc['fields']['name'] for doc in documents])
+
+
+  def test_export_directories_with_children(self):
+    # Test that exporting a directory exports children docs
+    # /
+    #   dir1/
+    #     query1.sql
+    #   dir2/
+    #     dir3/
+    #       query2.sql
+    #   query3.sql
+
+    dir1 = Directory.objects.create(name='dir1', owner=self.user, parent_directory=self.home_dir)
+    doc1 = Document2.objects.create(name='query1.sql', type='query-hive', owner=self.user, data={}, parent_directory=dir1)
+    dir2 = Directory.objects.create(name='dir2', owner=self.user, parent_directory=self.home_dir)
+    dir3 = Directory.objects.create(name='dir3', owner=self.user, parent_directory=dir2)
+    doc2 = Document2.objects.create(name='query2.sql', type='query-hive', owner=self.user, data={}, parent_directory=dir3)
+    doc3 = Document2.objects.create(name='query3.sql', type='query-hive', owner=self.user, data={}, parent_directory=self.home_dir)
+
+    response = self.client.get('/desktop/api2/doc/export/', {'documents': json.dumps([dir1.id, dir2.id, doc3.id]), 'format': 'json'})
+    documents = json.loads(response.content)
+    documents = json.loads(documents)
+
+    assert_equal(6, len(documents))
+    assert_true('dir1' in [doc['fields']['name'] for doc in documents])
+    assert_true('query1.sql' in [doc['fields']['name'] for doc in documents])
+    assert_true('dir2' in [doc['fields']['name'] for doc in documents])
+    assert_true('dir3' in [doc['fields']['name'] for doc in documents])
+    assert_true('query2.sql' in [doc['fields']['name'] for doc in documents])
+    assert_true('query3.sql' in [doc['fields']['name'] for doc in documents])
+
+
+  def test_import_owned_document(self):
+    owned_query = Document2.objects.create(
+      name='query.sql',
+      type='query-hive',
+      owner=self.user,
+      data={'description': 'original_query'},
+      parent_directory=self.home_dir
+    )
+
+    # Test that importing existing doc updates it and retains owner, UUID
+    response = self.client.get('/desktop/api2/doc/export/', {'documents': json.dumps([owned_query.id]), 'format': 'json'})
+    documents = response.content
+
+    response = self.client.post('/desktop/api2/doc/import/', {'documents': documents})
+    data = json.loads(response.content)
+
+    assert_true('message' in data, data)
+    assert_true('Installed 1 object' in data['message'], data)
+
+    assert_equal(1, Document2.objects.filter(name='query.sql').count())
+    imported_doc = Document2.objects.get(name='query.sql')
+    assert_equal(owned_query.uuid, imported_doc.uuid)
+    assert_equal(owned_query.owner, imported_doc.owner)
+
+    # Test that import non-existing doc creates it, sets parent to home
+    Document2.objects.get(name='query.sql').delete()
+    assert_equal(0, Document2.objects.filter(name='query.sql').count())
+
+    response = self.client.post('/desktop/api2/doc/import/', {'documents': documents})
+
+    assert_equal(1, Document2.objects.filter(name='query.sql').count())
+    imported_doc = Document2.objects.get(name='query.sql')
+    assert_equal(owned_query.uuid, imported_doc.uuid)
+    assert_equal(owned_query.owner, imported_doc.owner)
+    assert_equal(owned_query.parent_directory, imported_doc.parent_directory)
+
+  def test_import_nonowned_document(self):
+    owned_query = Document2.objects.create(
+      name='query.sql',
+      type='query-hive',
+      owner=self.user,
+      data={'description': 'original_query'},
+      parent_directory=self.home_dir
+    )
+
+    response = self.client.get('/desktop/api2/doc/export/', {'documents': json.dumps([owned_query.id]), 'format': 'json'})
+    documents = response.content
+
+    # Test that importing non-owned doc copies it, sets parent to home
+    response = self.client_not_me.post('/desktop/api2/doc/import/', {'documents': documents})
+
+    assert_equal(2, Document2.objects.filter(name='query.sql').count())
+    imported_doc = Document2.objects.get(name='query.sql', owner=self.user_not_me)
+    assert_true(owned_query.uuid != imported_doc.uuid)
+    assert_equal(self.user_not_me, imported_doc.owner)
+    assert_equal(self.not_me_home_dir.uuid, imported_doc.parent_directory.uuid)

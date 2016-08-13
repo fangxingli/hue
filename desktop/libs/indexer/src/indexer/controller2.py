@@ -25,8 +25,10 @@ from django.utils.translation import ugettext as _
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.i18n import smart_str
 from indexer.conf import CORE_INSTANCE_DIR
+from indexer.controller import get_solr_ensemble
 from indexer.utils import copy_configs
 from libsolr.api import SolrApi
+from libsentry.conf import is_enabled
 from libzookeeper.conf import ENSEMBLE
 from libzookeeper.models import ZookeeperClient
 from search.conf import SOLR_URL, SECURITY_ENABLED
@@ -37,10 +39,6 @@ MAX_UPLOAD_SIZE = 100 * 1024 * 1024 # 100 MB
 ALLOWED_FIELD_ATTRIBUTES = set(['name', 'type', 'indexed', 'stored'])
 FLAGS = [('I', 'indexed'), ('T', 'tokenized'), ('S', 'stored'), ('M', 'multivalued')]
 ZK_SOLR_CONFIG_NAMESPACE = 'configs'
-
-
-def get_solr_ensemble():
-  return '%s/solr' % ENSEMBLE.get()
 
 
 class IndexControllerException(Exception):
@@ -116,6 +114,10 @@ class IndexController(object):
         root_node = '%s/%s' % (ZK_SOLR_CONFIG_NAMESPACE, name)
         config_root_path = '%s/%s' % (solr_config_path, 'conf')
         zc.copy_path(root_node, config_root_path)
+
+        if is_enabled():
+          with open(os.path.join(config_root_path, 'solrconfig.xml.secure')) as f:
+            zc.set(os.path.join(root_node, 'conf', 'solrconfig.xml'), f.read())
 
         if not self.api.create_collection(name):
           raise Exception('Failed to create collection: %s' % name)
@@ -193,8 +195,8 @@ class IndexController(object):
 
 
   def _format_flags(self, fields):
-    for field_name, field in fields.items():
-      for index in range(0, len(FLAGS)):
-        flags = FLAGS[index]
-        field[flags[1]] = field['flags'][index] == FLAGS[index][0]
+    for name, properties in fields.items():
+      for (code, value) in FLAGS:
+        if code in properties['flags']:
+          properties[value] = True  # Add a new key-value boolean for the decoded flag
     return fields

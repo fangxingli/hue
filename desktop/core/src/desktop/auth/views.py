@@ -123,7 +123,8 @@ def dt_login(request, from_modal=False):
         if request.session.test_cookie_worked():
           request.session.delete_test_cookie()
 
-        if is_first_login_ever or 'AllowAllBackend' in backend_names or 'LdapBackend' in backend_names:
+        auto_create_home_backends = ['AllowAllBackend', 'LdapBackend', 'SpnegoDjangoBackend']
+        if is_first_login_ever or any(backend in backend_names for backend in auto_create_home_backends):
           # Create home directory for first user.
           try:
             ensure_home_directory(request.fs, user.username)
@@ -158,12 +159,13 @@ def dt_login(request, from_modal=False):
     auth_form = AuthenticationForm()
 
   if DEMO_ENABLED.get() and not 'admin' in request.REQUEST:
-    user = authenticate(username='', password='')
+    user = authenticate(username=request.user.username, password='HueRocks')
     login(request, user)
     ensure_home_directory(request.fs, user.username)
     return HttpResponseRedirect(redirect_to)
 
-  request.session.set_test_cookie()
+  if not from_modal:
+    request.session.set_test_cookie()
 
   renderable_path = 'login.mako'
   if from_modal:

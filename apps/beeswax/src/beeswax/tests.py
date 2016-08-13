@@ -80,11 +80,13 @@ from beeswax.server.hive_server2_lib import HiveServerClient,\
   PartitionKeyCompatible, PartitionValueCompatible, HiveServerTable,\
   HiveServerTColumnValue2
 from beeswax.test_base import BeeswaxSampleProvider, is_hive_on_spark
-from beeswax.hive_site import get_metastore
+from beeswax.hive_site import get_metastore, hiveserver2_jdbc_url
 
 
 LOG = logging.getLogger(__name__)
 
+def _list_dir_without_temp_files(fs, target_dir):
+  return [f for f in fs.listdir(target_dir) if not f.startswith('.')]
 
 def _make_query(client, query, submission_type="Execute",
                 udfs=None, settings=None, resources=[],
@@ -535,7 +537,7 @@ for x in sys.stdin:
     response = _make_query(c, CREATE_TABLE, database=self.db_name)
     wait_for_query_to_finish(c, response)
 
-    response = _make_query(c, "SELECT SUM(foo) FROM `%(db)s`.`test_explain`" % {'db': self.db_name}, submission_type="Explain") # Need to prefix database in Explain
+    response = _make_query(c, "SELECT SUM(foo) FROM `%(db)s`.`test_explain`" % {'db': self.db_name}, settings=[('hive.explain.user', 'false')], submission_type="Explain") # Need to prefix database in Explain
     explanation = json.loads(response.content)['explanation']
     assert_true('STAGE DEPENDENCIES:' in explanation, explanation)
     assert_true('STAGE PLANS:' in explanation, explanation)
@@ -546,7 +548,7 @@ for x in sys.stdin:
       raise SkipTest('HUE-2884: Skipping test because we cannot guarantee live cluster supports utf8')
 
     query = u"SELECT foo FROM `%(db)s`.`test_utf8` WHERE bar='%(val)s'" % {'val': unichr(200), 'db': self.db_name}
-    response = _make_query(self.client, query, submission_type="Explain")
+    response = _make_query(self.client, query, settings=[('hive.explain.user', 'false')], submission_type="Explain")
     explanation = json.loads(response.content)['explanation']
     assert_true('STAGE DEPENDENCIES:' in explanation, explanation)
     assert_true('STAGE PLANS:' in explanation, explanation)
@@ -809,6 +811,7 @@ for x in sys.stdin:
     resp = download(handle, 'xls', self.db)
 
     sheet_data = _read_xls_sheet_data(resp)
+    num_cols = len(sheet_data[0])
     # It should have 257 lines (256 + header)
     assert_equal(len(sheet_data), 257, sheet_data)
 
@@ -821,6 +824,19 @@ for x in sys.stdin:
     csv_data = [[int(col) if col.isdigit() else col for col in row.split(',')] for row in csv_resp.strip().split('\r\n')]
 
     assert_equal(sheet_data, csv_data)
+
+    # Test max cell limit truncation
+    finish = conf.DOWNLOAD_CELL_LIMIT.set_for_testing(num_cols * 5)
+    try:
+      hql = 'SELECT * FROM `%(db)s`.`test`' % {'db': self.db_name}
+      query = hql_query(hql)
+      handle = self.db.execute_and_wait(query)
+      resp = download(handle, 'xls', self.db)
+      sheet_data = _read_xls_sheet_data(resp)
+      # It should have 5 lines
+      assert_equal(len(sheet_data), 5, sheet_data)
+    finally:
+      finish()
 
 
   def test_data_upload(self):
@@ -1044,12 +1060,9 @@ for x in sys.stdin:
 
       # Check that data is right
       if verify:
-        target_ls = self.cluster.fs.listdir(target_dir)[1:]
-        assert_true(len(target_ls) >= 1)
-        data_buf = ""
-
-
+        target_ls = _list_dir_without_temp_files(self.cluster.fs, target_dir)
         assert_equal(len(target_ls), 1)
+        data_buf = ""
 
         for target in target_ls:
           target_file = self.cluster.fs.open(target_dir + '/' + target)
@@ -1205,20 +1218,20 @@ for x in sys.stdin:
     self.client.post('/beeswax/install_examples')
 
     # New tables exists
-    resp = self.client.get('/metastore/tables/?format=json')
+    resp = self.client.get('/metastore/tables/%s?format=json' % self.db_name)
     data = json.loads(resp.content)
     assert_true('sample_08' in data['table_names'])
     assert_true('sample_07' in data['table_names'])
     assert_true('customers' in data['table_names'])
 
-    # Sample tables contain data (examples are installed in default DB)
-    resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': 'default', 'table': 'sample_07'}))
+    # Sample tables contain data (examples are installed in db_name DB)
+    resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': self.db_name, 'table': 'sample_07'}))
     data = json.loads(resp.content)
     assert_true(data['rows'], data)
-    resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': 'default', 'table': 'sample_08'}))
+    resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': self.db_name, 'table': 'sample_08'}))
     data = json.loads(resp.content)
     assert_true(data['rows'], data)
-    resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': 'default', 'table': 'customers'}))
+    resp = self.client.get(reverse('beeswax:get_sample_data', kwargs={'database': self.db_name, 'table': 'customers'}))
 
     if USE_NEW_EDITOR.get():
       # New queries exist
@@ -1427,6 +1440,7 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_file': 'on',
       'path': self.cluster.fs_prefix + '/comma.dat',
+      'load_data': 'IMPORT',
       'name': 'test_create_import',
     })
     assert_equal(resp.context['fields_list'], RAW_FIELDS)
@@ -1435,6 +1449,7 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_file': 'on',
       'path': self.cluster.fs_prefix + '/comma.dat.gz',
+      'load_data': 'IMPORT',
       'name': 'test_create_import',
     })
     assert_equal(resp.context['fields_list'], RAW_FIELDS)
@@ -1443,6 +1458,7 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_preview': 'on',
       'path': self.cluster.fs_prefix + '/spacé.dat',
+      'load_data': 'IMPORT',
       'name': 'test_create_import',
       'delimiter_0': ' ',
       'delimiter_1': '',
@@ -1454,6 +1470,7 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_preview': 'on',
       'path': self.cluster.fs_prefix + '/pipes.dat',
+      'load_data': 'IMPORT',
       'name': 'test_create_import',
       'delimiter_0': '__other__',
       'delimiter_1': '|',
@@ -1465,6 +1482,7 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_preview': 'on',
       'path': self.cluster.fs_prefix + '/comma.csv',
+      'load_data': 'IMPORT',
       'name': 'test_create_import_csv',
       'delimiter_0': '__other__',
       'delimiter_1': ',',
@@ -1480,6 +1498,7 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_delim': 'on',
       'path': self.cluster.fs_prefix + '/comma.dat.gz',
+      'load_data': 'IMPORT',
       'name': 'test_create_import',
       'delimiter_0': ',',
       'delimiter_1': '',
@@ -1492,11 +1511,11 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_create': 'on',
       'path': self.cluster.fs_prefix + '/comma.dat.gz',
+      'load_data': 'IMPORT',
       'name': 'test_create_import',
       'delimiter_0': ',',
       'delimiter_1': '',
       'file_type': 'gzip',
-      'do_import': 'True',
       'cols-0-_exists': 'True',
       'cols-0-column_name': 'col_a',
       'cols-0-column_type': 'string',
@@ -1554,11 +1573,11 @@ for x in sys.stdin:
     resp = self.client.post('/beeswax/create/import_wizard/%s' % self.db_name, {
       'submit_create': 'on',
       'path': self.cluster.fs_prefix + '/comma.csv',
+      'load_data': 'IMPORT',
       'name': 'test_create_import_with_header',
       'delimiter_0': ',',
       'delimiter_1': '',
       'file_type': 'text',
-      'do_import': 'True',
       'cols-0-_exists': 'True',
       'cols-0-column_name': 'col_a',
       'cols-0-column_type': 'string',
@@ -1733,7 +1752,7 @@ for x in sys.stdin:
     finish = conf.QUERY_PARTITIONS_LIMIT.set_for_testing(1)
     try:
       table_name = 'test_partitions'
-      partition_spec = "(baz='baz_one' AND boom='boom_two')"
+      partition_spec = "(`baz`='baz_one' AND `boom`='boom_two')"
       table = self.db.get_table(database=self.db_name, table_name=table_name)
       hql = self.db._get_sample_partition_query(self.db_name, table, limit=10)
       assert_equal(hql, 'SELECT * FROM `%s`.`%s` WHERE %s LIMIT 10' % (self.db_name, table_name, partition_spec))
@@ -1744,7 +1763,7 @@ for x in sys.stdin:
     finish = conf.QUERY_PARTITIONS_LIMIT.set_for_testing(2)
     try:
       table_name = 'test_partitions'
-      partition_spec = "(baz='baz_one' AND boom='boom_two') OR (baz='baz_foo' AND boom='boom_bar')"
+      partition_spec = "(`baz`='baz_one' AND `boom`='boom_two') OR (`baz`='baz_foo' AND `boom`='boom_bar')"
       table = self.db.get_table(database=self.db_name, table_name=table_name)
       hql = self.db._get_sample_partition_query(self.db_name, table, limit=10)
       assert_equal(hql, 'SELECT * FROM `%s`.`%s` WHERE %s LIMIT 10' % (self.db_name, table_name, partition_spec))
@@ -1835,10 +1854,10 @@ for x in sys.stdin:
     _make_query(self.client, "USE %s" % self.db_name, wait=True) # We need this until Hive 1.2
 
     try:
-      # No stats
+      # Retrieve stats before analyze
       resp = self.client.get(reverse('beeswax:get_table_stats', kwargs={'database': self.db_name, 'table': 'test'}))
       stats = json.loads(resp.content)['stats']
-      assert_equal('COLUMN_STATS_ACCURATE', stats[0]['data_type'], resp.content)
+      assert_true(any([stat for stat in stats if stat['data_type'] == 'numRows' and stat['comment'] == '0']), resp.content)
 
       resp = self.client.get(reverse('beeswax:get_table_stats', kwargs={'database': self.db_name, 'table': 'test', 'column': 'foo'}))
       stats = json.loads(resp.content)['stats']
@@ -1866,11 +1885,10 @@ for x in sys.stdin:
       response = wait_for_query_to_finish(self.client, response, max=120.0)
       assert_true(response, response)
 
-      # Retrieve stats
+      # Retrieve stats after analyze
       resp = self.client.get(reverse('beeswax:get_table_stats', kwargs={'database': self.db_name, 'table': 'test'}))
       stats = json.loads(resp.content)['stats']
-      assert_true(any([stat for stat in stats if stat['data_type'] == 'numRows']), resp.content)
-      assert_true(any([stat for stat in stats if stat['comment'] == '256']), resp.content)
+      assert_true(any([stat for stat in stats if stat['data_type'] == 'numRows' and stat['comment'] == '256']), resp.content)
 
       resp = self.client.get(reverse('beeswax:get_table_stats', kwargs={'database': self.db_name, 'table': 'test', 'column': 'foo'}))
       stats = json.loads(resp.content)['stats']
@@ -2285,7 +2303,7 @@ def test_search_log_line():
 
 
 def test_split_statements():
-  assert_equal([], hql_query(";;;").statements)
+  assert_equal([''], hql_query(";;;").statements)
   assert_equal(["select * where id == '10'"], hql_query("select * where id == '10'").statements)
   assert_equal(["select * where id == '10'"], hql_query("select * where id == '10';").statements)
   assert_equal(['select', "select * where id == '10;' limit 100"], hql_query("select; select * where id == '10;' limit 100;").statements)
@@ -2377,6 +2395,76 @@ class MockHiveServerTable(HiveServerTable):
         ]
 
 
+class MockHiveServerTableForPartitions(HiveServerTable):
+
+  def __init__(self, describe=None):
+    if describe is not None:
+      self.describe = describe
+    else:
+      self.describe = [
+        {'comment': 'comment             ', 'col_name': '# col_name            ', 'data_type': 'data_type           '},
+        {'comment': 'NULL', 'col_name': '', 'data_type': 'NULL'},
+        {'comment': 'from deserializer', 'col_name': 'f1', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f2', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f3', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f4', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f5', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f6', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f7', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f8', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f9', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f10', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f11', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f12', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f13', 'data_type': 'bigint'},
+        {'comment': 'from deserializer', 'col_name': 'f14', 'data_type': 'int'},
+        {'comment': 'from deserializer', 'col_name': 'f15', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f16', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f17', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f18', 'data_type': 'timestamp'},
+        {'comment': 'from deserializer', 'col_name': 'f19', 'data_type': 'int'},
+        {'comment': 'from deserializer', 'col_name': 'f20', 'data_type': 'int'},
+        {'comment': 'from deserializer', 'col_name': 'f21', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f22', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f23', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f24', 'data_type': 'string'},
+        {'comment': 'from deserializer', 'col_name': 'f25', 'data_type': 'timestamp'},
+        {'comment': 'from deserializer', 'col_name': 'f26', 'data_type': 'int'},
+        {'comment': 'from deserializer', 'col_name': 'f27', 'data_type': 'binary'},
+        {'comment': 'NULL', 'col_name': '', 'data_type': 'NULL'},
+        {'comment': 'NULL', 'col_name': '# Partition Information', 'data_type': 'NULL'},
+        {'comment': 'comment             ', 'col_name': '# col_name            ', 'data_type': 'data_type           '},
+        {'comment': 'NULL', 'col_name': '', 'data_type': 'NULL'},
+        {'comment': '', 'col_name': 'import_date', 'data_type': 'string'},
+        {'comment': '', 'col_name': 'import_id', 'data_type': 'int'},
+        {'comment': 'NULL', 'col_name': '', 'data_type': 'NULL'},
+        {'comment': 'NULL', 'col_name': '# Detailed Table Information', 'data_type': 'NULL'},
+        {'comment': 'NULL', 'col_name': 'Database:           ', 'data_type': 'my_db           '},
+        {'comment': 'NULL', 'col_name': 'Owner:              ', 'data_type': 'hive                '},
+        {'comment': 'NULL', 'col_name': 'CreateTime:         ', 'data_type': 'Wed Feb 10 14:29:49 UTC 2016'},
+        {'comment': 'NULL', 'col_name': 'LastAccessTime:     ', 'data_type': 'UNKNOWN             '},
+        {'comment': 'NULL', 'col_name': 'Protect Mode:       ', 'data_type': 'None                '},
+        {'comment': 'NULL', 'col_name': 'Retention:          ', 'data_type': '0                   '},
+        {'comment': 'NULL', 'col_name': 'Location:           ', 'data_type': 'hdfs://nameservice1/folder/folder'},
+        {'comment': 'NULL', 'col_name': 'Table Type:         ', 'data_type': 'EXTERNAL_TABLE      '},
+        {'comment': 'NULL', 'col_name': 'Table Parameters:', 'data_type': 'NULL'},
+        {'comment': 'TRUE                ', 'col_name': '', 'data_type': 'EXTERNAL            '},
+        {'comment': '1455114589          ', 'col_name': '', 'data_type': 'transient_lastDdlTime'},
+        {'comment': 'NULL', 'col_name': '', 'data_type': 'NULL'},
+        {'comment': 'NULL', 'col_name': '# Storage Information', 'data_type': 'NULL'},
+        {'comment': 'NULL', 'col_name': 'SerDe Library:      ', 'data_type': 'com.x.y.z.a.MyDeserializer'},
+        {'comment': 'NULL', 'col_name': 'InputFormat:        ', 'data_type': 'com.x.y.z.a.MyInputFormat'},
+        {'comment': 'NULL', 'col_name': 'OutputFormat:       ', 'data_type': 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'},
+        {'comment': 'NULL', 'col_name': 'Compressed:         ', 'data_type': 'No                  '},
+        {'comment': 'NULL', 'col_name': 'Num Buckets:        ', 'data_type': '-1                  '},
+        {'comment': 'NULL', 'col_name': 'Bucket Columns:     ', 'data_type': '[]                  '},
+        {'comment': 'NULL', 'col_name': 'Sort Columns:       ', 'data_type': '[]                  '},
+        {'comment': 'NULL', 'col_name': 'Storage Desc Params:', 'data_type': 'NULL'},
+        {'comment': '1       ', 'col_name': '', 'data_type': 'serialization.format'},
+  ]
+
+
+
 class TestHiveServer2API():
 
   def test_parsing_partition_values(self):
@@ -2438,6 +2526,16 @@ class TestHiveServer2API():
     assert_equal([PartitionKeyCompatible('baz', 'string', ''),
                   PartitionKeyCompatible('boom', 'string', '')
                  ], table.partition_keys)
+
+
+  def test_hiveserver_table_for_partitions(self):
+    table = MockHiveServerTableForPartitions()
+
+    assert_equal([
+        PartitionKeyCompatible('import_date', 'string', ''),
+        PartitionKeyCompatible('import_id', 'int', '')
+      ], table.partition_keys
+    )
 
 
   def test_hiveserver_has_complex(self):
@@ -2874,18 +2972,18 @@ def test_hiveserver2_get_security():
     # Beeswax
     beeswax_query_server = {'server_name': 'beeswax', 'principal': 'hive', 'auth_username': 'hue', 'auth_password': None}
     beeswax_query_server.update(default_query_server)
-    assert_equal((True, 'PLAIN', 'hive', False, 'hue', None), HiveServerClient(beeswax_query_server, user).get_security())
+    assert_equal((True, 'PLAIN', 'hive', True, 'hue', None), HiveServerClient(beeswax_query_server, user).get_security())
 
     # HiveServer2 LDAP passthrough
     beeswax_query_server.update({'auth_username': 'hueabcd', 'auth_password': 'abcd'})
-    assert_equal((True, 'PLAIN', 'hive', False, 'hueabcd', 'abcd'), HiveServerClient(beeswax_query_server, user).get_security())
+    assert_equal((True, 'PLAIN', 'hive', True, 'hueabcd', 'abcd'), HiveServerClient(beeswax_query_server, user).get_security())
     beeswax_query_server.update({'auth_username': 'hue', 'auth_password': None})
 
     hive_site._HIVE_SITE_DICT[hive_site._CNF_HIVESERVER2_AUTHENTICATION] = 'NOSASL'
-    hive_site._HIVE_SITE_DICT[hive_site._CNF_HIVESERVER2_IMPERSONATION] = 'true'
-    assert_equal((False, 'NOSASL', 'hive', True, 'hue', None), HiveServerClient(beeswax_query_server, user).get_security())
+    hive_site._HIVE_SITE_DICT[hive_site._CNF_HIVESERVER2_IMPERSONATION] = 'false'
+    assert_equal((False, 'NOSASL', 'hive', False, 'hue', None), HiveServerClient(beeswax_query_server, user).get_security())
     hive_site._HIVE_SITE_DICT[hive_site._CNF_HIVESERVER2_AUTHENTICATION] = 'KERBEROS'
-    assert_equal((True, 'GSSAPI', 'hive', True, 'hue', None), HiveServerClient(beeswax_query_server, user).get_security())
+    assert_equal((True, 'GSSAPI', 'hive', False, 'hue', None), HiveServerClient(beeswax_query_server, user).get_security())
 
     # Impala
     cluster_conf = hadoop.cluster.get_cluster_conf_for_job_submission()
@@ -3285,3 +3383,36 @@ def test_apply_natural_sort():
                                                             {'name': 'test_2', 'comment': 'Test'},
                                                             {'name': 'test_100', 'comment': 'Test'},
                                                             {'name': 'test_200', 'comment': 'Test'}])
+
+def test_hiveserver2_jdbc_url():
+  hostname = socket.getfqdn()
+  resets = [
+    beeswax.conf.HIVE_SERVER_HOST.set_for_testing(hostname),
+    beeswax.conf.HIVE_SERVER_PORT.set_for_testing('10000')
+  ]
+  try:
+    url = hiveserver2_jdbc_url()
+    assert_equal(url, 'jdbc:hive2://' + hostname + ':10000/default')
+
+    beeswax.conf.HIVE_SERVER_HOST.set_for_testing('server-with-ssl-enabled.com')
+    beeswax.conf.HIVE_SERVER_PORT.set_for_testing('10000')
+    url = hiveserver2_jdbc_url()
+    assert_equal(url, 'jdbc:hive2://server-with-ssl-enabled.com:10000/default')
+
+    beeswax.hive_site.reset()
+    beeswax.hive_site.get_conf()[hive_site._CNF_HIVESERVER2_USE_SSL] = 'TRUE'
+    beeswax.hive_site.get_conf()[hive_site._CNF_HIVESERVER2_TRUSTSTORE_PATH] = '/path/to/truststore.jks'
+    beeswax.hive_site.get_conf()[hive_site._CNF_HIVESERVER2_TRUSTSTORE_PASSWORD] = 'password'
+    url = hiveserver2_jdbc_url()
+    assert_equal(url, 'jdbc:hive2://server-with-ssl-enabled.com:10000/default;ssl=true;sslTrustStore=/path/to/truststore.jks;trustStorePassword=password')
+
+    beeswax.hive_site.get_conf()[hive_site._CNF_HIVESERVER2_USE_SSL] = 'FALSE'
+    url = hiveserver2_jdbc_url()
+    assert_equal(url, 'jdbc:hive2://server-with-ssl-enabled.com:10000/default')
+  finally:
+    beeswax.hive_site.reset()
+    for reset in resets:
+        reset()
+
+
+

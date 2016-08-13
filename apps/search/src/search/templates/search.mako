@@ -38,10 +38,6 @@ ${ commonheader(_('Search'), "search", user, "80px") | n,unicode }
 
 <div class="search-bar" data-bind="visible: ! $root.isPlayerMode()">
   <div class="pull-right" style="padding-right:50px">
-    <a class="btn pointer" title="${ _('Player mode') }" rel="tooltip" data-placement="bottom" data-bind="click: function(){ hueUtils.goFullScreen(); $root.isEditing(false); $root.isPlayerMode(true); }">
-      <i class="fa fa-expand"></i>
-    </a>
-    &nbsp;&nbsp;
     <a class="btn pointer" title="${ _('Edit') }" rel="tooltip" data-placement="bottom" data-bind="click: toggleEditing, css: {'btn': true, 'btn-inverse': isEditing}">
       <i class="fa fa-pencil"></i>
     </a>
@@ -50,6 +46,10 @@ ${ commonheader(_('Search'), "search", user, "80px") | n,unicode }
       <i class="fa fa-save"></i>
     </a>
     % endif
+    <a class="btn pointer" title="${ _('Player mode') }" rel="tooltip" data-placement="bottom" data-bind="click: function(){ hueUtils.goFullScreen(); $root.isEditing(false); $root.isPlayerMode(true); }">
+      <i class="fa fa-expand"></i>
+    </a>
+    &nbsp;&nbsp;&nbsp;
     <a class="btn pointer" title="${ _('General Settings') }" rel="tooltip" data-placement="bottom" data-toggle="modal" data-target="#settingsDemiModal"
         data-bind="css: {'btn': true}, visible: columns().length != 0">
       <i class="fa fa-cog"></i>
@@ -272,7 +272,7 @@ ${ commonheader(_('Search'), "search", user, "80px") | n,unicode }
   <h4 data-bind="text: collection.label"></h4>
   <form class="form-search" data-bind="submit: searchBtn">
   <span data-bind="foreach: query.qs">
-    <input data-bind="clearable: q, typeahead: { target: q, source: $root.collection.template.fieldsNames, multipleValues: true, multipleValuesSeparator: ':', extraKeywords: 'AND OR TO', completeSolrRanges: true }, css:{'input-xlarge': $root.query.qs().length == 1, 'input-medium': $root.query.qs().length < 4, 'input-small': $root.query.qs().length >= 4}" maxlength="4096" type="text" class="search-query">
+    <input data-bind="clearable: q, valueUpdate:'afterkeydown', typeahead: { target: q, source: $root.collection.template.fieldsNames, multipleValues: true, multipleValuesSeparator: ':', extraKeywords: 'AND OR TO', completeSolrRanges: true }, css:{'input-xlarge': $root.query.qs().length == 1, 'input-medium': $root.query.qs().length < 4, 'input-small': $root.query.qs().length >= 4}" maxlength="4096" type="text" class="search-query">
     <!-- ko if: $parent.query.qs().length > 1 -->
     <div class="pointer muted link" data-bind="click: $root.query.removeQ"><i class="fa fa-minus"></i></div>
     <!-- /ko -->
@@ -551,17 +551,17 @@ ${ dashboard.layout_skeleton() }
         <div style="margin-top:3px">
           <a class="grid-side-btn active" href="javascript: void(0)"
              data-bind="click: function(){ $root.collection.template.showChart(false); $root.collection.template.showGrid(true); }, css: {'active': $root.collection.template.showGrid() }" title="${_('Grid')}">
-            <i class="fa fa-th"></i>
+            <i class="fa fa-th fa-fw"></i>
           </a>
         </div>
 
         <div class="dropdown">
           <a class="grid-side-btn" style="padding-right:0" href="javascript:void(0)"
              data-bind="css: {'active': $root.collection.template.showChart() }, click: function(){ $root.collection.template.showChart(true); $root.collection.template.showGrid(false); huePubSub.publish('gridChartForceUpdate'); }">
-            <i class="hcha hcha-bar-chart" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.BARCHART"></i>
-            <i class="hcha hcha-line-chart" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.LINECHART"
+            <i class="hcha hcha-bar-chart fa-fw" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.BARCHART"></i>
+            <i class="hcha hcha-line-chart fa-fw" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.LINECHART"
                style="display: none;"></i>
-            <i class="hcha hcha-pie-chart" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.PIECHART"
+            <i class="hcha hcha-pie-chart fa-fw" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.PIECHART"
                style="display: none;"></i>
             <i class="fa fa-fw fa-map-marker" data-bind="visible: $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.MAP"
                style="display: none;"></i>
@@ -576,19 +576,19 @@ ${ dashboard.layout_skeleton() }
               <a href="javascript:void(0)"
                  data-bind="css: {'active': $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.BARCHART}, click: function(){ $root.collection.template.showChart(true); $root.collection.template.chartSettings.chartType(ko.HUE_CHARTS.TYPES.BARCHART); $root.collection.template.showGrid(false); huePubSub.publish('gridChartForceUpdate');}"
                  class="active">
-                <i class="hcha hcha-bar-chart"></i> ${_('Bars')}
+                <i class="hcha hcha-bar-chart fa-fw"></i> ${_('Bars')}
               </a>
             </li>
             <li>
               <a href="javascript:void(0)"
                  data-bind="css: {'active': $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.LINECHART}, click: function(){ $root.collection.template.showChart(true); $root.collection.template.chartSettings.chartType(ko.HUE_CHARTS.TYPES.LINECHART); $root.collection.template.showGrid(false); huePubSub.publish('gridChartForceUpdate');}">
-                <i class="hcha hcha-line-chart"></i> ${_('Lines')}
+                <i class="hcha hcha-line-chart fa-fw"></i> ${_('Lines')}
               </a>
             </li>
             <li>
               <a href="javascript:void(0)"
                  data-bind="css: {'active': $root.collection.template.chartSettings.chartType() == ko.HUE_CHARTS.TYPES.PIECHART}, click: function(){ $root.collection.template.showChart(true); $root.collection.template.chartSettings.chartType(ko.HUE_CHARTS.TYPES.PIECHART); $root.collection.template.showGrid(false); huePubSub.publish('gridChartForceUpdate');}">
-                <i class="hcha hcha-pie-chart"></i> ${_('Pie')}
+                <i class="hcha hcha-pie-chart fa-fw"></i> ${_('Pie')}
               </a>
             </li>
             <li>
@@ -601,8 +601,14 @@ ${ dashboard.layout_skeleton() }
         </div>
 
         <div>
-          <a class="grid-side-btn" href="javascript:void(0)" data-bind="click: function(){ $root.collection.template.showFieldList(!$root.collection.template.showFieldList())}, css: { 'blue' : $root.collection.template.showFieldList() }"><i
-              class="fa fa-cog"></i></a>
+          <a class="grid-side-btn" href="javascript:void(0)" data-bind="click: function(){ $root.collection.template.showFieldList(!$root.collection.template.showFieldList())}, css: { 'blue' : $root.collection.template.showFieldList() }">
+            <!-- ko if: $root.collection.template.showFieldList() -->
+              <i class="fa fa-fw fa-chevron-left"></i>
+            <!-- /ko -->
+            <!-- ko ifnot: $root.collection.template.showFieldList() -->
+              <i class="fa fa-fw fa-columns"></i>
+            <!-- /ko -->
+          </a>
         </div>
         <form method="POST" action="${ url('search:download') }" style="display:inline">
           ${ csrf_token(request) | n,unicode }
@@ -612,7 +618,7 @@ ${ dashboard.layout_skeleton() }
           <input type="hidden" name="type" value="">
           <div class="dropdown">
             <a class="grid-side-btn dropdown-toggle" style="padding-left:7px" data-toggle="dropdown">
-              <i class="fa fa-download"></i>
+              <i class="fa fa-download fa-fw"></i>
             </a>
             <ul class="dropdown-menu">
               <li>
@@ -641,7 +647,7 @@ ${ dashboard.layout_skeleton() }
 
   <div class="grid-results">
     <span data-bind="visible: $root.hasRetrievedResults() && $root.response().response">
-      <div data-bind="visible: $root.collection.template.showFieldList() && $root.collection.template.showGrid()" style="float:left; width:200px; margin-right:10px; background-color:#FFF; padding:5px; border-right:1px solid #EEE">
+      <div data-bind="visible: $root.collection.template.showFieldList() && $root.collection.template.showGrid()" style="float:left; width:200px; margin-right:10px; background-color:#FFF; padding:5px;">
         <input type="text" data-bind="clearable: $root.collection.template.fieldsAttributesFilter, valueUpdate:'afterkeydown'" placeholder="${_('Filter fields')}" style="width:180px; margin-bottom:10px" />
         <div style="margin-bottom: 8px">
           <a href="javascript: void(0)" data-bind="click: function(){$root.collection.template.filteredAttributeFieldsAll(true)}, style: {'font-weight': $root.collection.template.filteredAttributeFieldsAll() ? 'bold': 'normal'}">${_('All')} (<span data-bind="text: $root.collection.template.fieldsAttributes().length"></span>)</a> / <a href="javascript: void(0)" data-bind="click: function(){$root.collection.template.filteredAttributeFieldsAll(false)}, style: {'font-weight': ! $root.collection.template.filteredAttributeFieldsAll() ? 'bold': 'normal'}">${_('Current')} (<span data-bind="text: $root.collection.template.fields().length"></span>)</a>
@@ -655,10 +661,10 @@ ${ dashboard.layout_skeleton() }
           <strong>${_('Field Name')}</strong>
         </div>
         <div class="fields-list" data-bind="foreach: $root.collection.template.filteredAttributeFields">
-          <div style="margin-bottom: 3px; white-space: nowrap">
-            <i class="fa fa-question-circle pull-right muted pointer analysis" data-bind="click: function() { $root.fieldAnalysesName(name()); $root.showFieldAnalysis(); }, attr: {'title': '${ _ko('Click to analyze field') } ' + name() + ' (' + type() + ')'}"></i>
+          <div style="margin-bottom: 3px; white-space: nowrap; position:relative">
             <input type="checkbox" data-bind="checkedValue: name, checked: $root.collection.template.fieldsSelected" style="margin: 0" />
             <div data-bind="text: name, css:{'field-selector': true, 'hoverable': $root.collection.template.fieldsSelected.indexOf(name()) > -1}, click: highlightColumn" style="margin-right:10px"></div>
+            <i class="fa fa-question-circle muted pointer analysis" data-bind="click: function() { $root.fieldAnalysesName(name()); $root.showFieldAnalysis(); }, attr: {'title': '${ _ko('Click to analyze field') } ' + name() + ' (' + type() + ')'}" style="position:absolute; left: 168px; background-color: #FFF"></i>
           </div>
         </div>
         <div data-bind="visible: $root.collection.template.filteredAttributeFields().length == 0" style="padding-left:4px; padding-top:5px; font-size:40px; color:#CCC">
@@ -666,8 +672,14 @@ ${ dashboard.layout_skeleton() }
         </div>
       </div>
 
-      <div data-bind="visible: $root.collection.template.showFieldList() && $root.collection.template.showChart()" style="float:left; width:200px; margin-right:10px; background-color:#FFF; padding:5px; border-right: 1px solid #EEE">
+      <div data-bind="visible: $root.collection.template.showFieldList() && $root.collection.template.showChart()" style="float:left; width:200px; margin-right:10px; background-color:#FFF; padding:5px;">
         <span data-bind="template: {name: 'grid-chart-settings', data: $root.collection.template.chartSettings}"></span>
+      </div>
+
+      <div style="position: absolute; margin-left: 208px; top: 0px; margin-top: 130px;" data-bind="visible: $root.collection.template.showFieldList()">
+        <a class="inactive-action pointer" title="${_('Hide settings')}" data-bind="click: function() { $root.collection.template.showFieldList(false) }">
+          <i class="fa fa-chevron-left"></i>
+        </a>
       </div>
     </span>
 
@@ -757,7 +769,7 @@ ${ dashboard.layout_skeleton() }
     <li data-bind="visible: chartType() == ko.HUE_CHARTS.TYPES.PIECHART" class="nav-header">${_('value')}</li>
   </ul>
 
-  <div style="overflow-y: scroll; max-height: 220px" data-bind="visible: chartType() != '' && (chartType() == ko.HUE_CHARTS.TYPES.BARCHART || chartType() == ko.HUE_CHARTS.TYPES.LINECHART)">
+  <div style="overflow-y: auto; max-height: 220px" data-bind="visible: chartType() != '' && (chartType() == ko.HUE_CHARTS.TYPES.BARCHART || chartType() == ko.HUE_CHARTS.TYPES.LINECHART)">
     <ul class="unstyled" data-bind="foreach: $root.collection.template.cleanedNumericMeta">
       <li><input type="checkbox" data-bind="checkedValue: name, checked: $parent.chartYMulti" /> <span data-bind="text: $data.name"></span></li>
     </ul>
@@ -2050,7 +2062,6 @@ ${ dashboard.layout_skeleton() }
 <link rel="stylesheet" href="${ static('desktop/ext/select2/select2.css') }">
 
 <script src="${ static('desktop/js/hue.json.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/ext/js/moment-with-locales.min.js') }" type="text/javascript" charset="utf-8"></script>
 
 ${ dashboard.import_layout(True) }
 
@@ -2625,13 +2636,6 @@ function multiSerieDataTransformerGrid(rawDatum) {
   return _datum;
 }
 
-function toggleDocDetails(doc) {
-  doc.showDetails(! doc.showDetails());
-
-  if (doc.details().length == 0) {
-    viewModel.getDocument(doc);
-  }
-}
 
 function resizeFieldsList() {
   $(".fields-list").css("max-height", Math.max($("#result-container").height(), 230));
@@ -2642,7 +2646,40 @@ function resizeFieldsList() {
       $(".fields-list").css("max-height", _fillHeight);
     }
   }, 100);
+
+  var positionInfo = function () {
+    var leftPos = 184;
+    if ($('.fields-list').get(0).scrollHeight > $('.fields-list').height()) {
+      leftPos -= hueUtils.scrollbarWidth();
+    }
+    $('.fields-list i').css('left', (leftPos + $('.fields-list').scrollLeft()) + 'px');
+  }
+
+  var checkHeight = function () {
+    if ($('.fields-list').height() > 0) {
+      positionInfo();
+    } else {
+      window.setTimeout(checkHeight, 100);
+    }
+  }
+
+  checkHeight();
+
+  $('.fields-list').off('scroll');
+  $('.fields-list').on('scroll', positionInfo);
 }
+
+function toggleDocDetails(doc) {
+  doc.showDetails(! doc.showDetails());
+
+  if (doc.details().length == 0) {
+    viewModel.getDocument(doc, resizeFieldsList);
+  }
+  else {
+    window.setTimeout(resizeFieldsList, 0);
+  }
+}
+
 
 function queryTypeahead(query, process) {
   var _source = viewModel.collection.template.fieldsNames();
@@ -2844,6 +2881,7 @@ $(document).ready(function () {
 
 
   function toggleGridFieldsSelection() {
+    viewModel.resultsHash = '';
     if (viewModel.collection.template.fields().length > 0) {
       viewModel.collection.template.fieldsSelected([])
     }

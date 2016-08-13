@@ -39,15 +39,14 @@ ${ fb_components.menubar() }
     <div class="actionbar">
     <%actionbar:render>
       <%def name="search()">
-        <input type="text" class="input-large search-query" placeholder="${_('Search for file name')}" data-bind="value: searchQuery">
+        <input type="text" class="input-large search-query" placeholder="${_('Search for file name')}" data-bind="clearable: searchQuery, valueUpdate: 'afterkeydown'">
       </%def>
 
       <%def name="actions()">
         <div class="btn-toolbar" style="display: inline; vertical-align: middle">
           <div id="ch-dropdown" class="btn-group" style="vertical-align: middle">
             <button href="#" class="btn dropdown-toggle" title="${_('Actions')}" data-toggle="dropdown"
-            data-bind="visible:
-             !inTrash(), enable: selectedFiles().length > 0">
+            data-bind="visible: !inTrash(), enable: selectedFiles().length > 0 && (!isS3() || (isS3() && !isS3Root()))">
               <i class="fa fa-cog"></i> ${_('Actions')}
               <span class="caret" style="line-height: 15px"></span>
             </button>
@@ -66,7 +65,7 @@ ${ fb_components.menubar() }
                 </a>
               </li>
               % endif
-              <li class="divider"></li>
+              <li class="divider" data-bind="visible: !isS3()"></li>
               % if is_fs_superuser:
               <li data-bind="css: {'disabled': isCurrentDirSentryManaged() || selectedSentryFiles().length > 0 }">
                 <a href="#" data-bind="visible: ! inTrash(), click: changeOwner, enable: selectedFiles().length > 0">
@@ -74,13 +73,13 @@ ${ fb_components.menubar() }
                 </a>
               </li>
               % endif
-              <li data-bind="css: {'disabled': isCurrentDirSentryManaged() || selectedSentryFiles().length > 0 }">
+              <li data-bind="css: {'disabled': isCurrentDirSentryManaged() || selectedSentryFiles().length > 0 }, visible: !isS3()">
                 <a href="#" data-bind="visible: ! inTrash(), click: changePermissions, enable: selectedFiles().length > 0">
                   <i class="fa fa-fw fa-list-alt"></i> ${_('Change permissions')}
                 </a>
               </li>
-              <li class="divider"></li>
-              <li data-bind="css: {'disabled': inTrash() || selectedFiles().length > 1 }">
+              <li class="divider" data-bind="visible: !isS3()"></li>
+              <li data-bind="css: {'disabled': inTrash() || selectedFiles().length > 1 }, visible: !isS3()">
                 <a class="pointer" data-bind="click: function(){ selectedFiles().length == 1 ? showSummary(): void(0)}">
                   <i class="fa fa-fw fa-pie-chart"></i> ${_('Summary')}
                 </a>
@@ -90,6 +89,10 @@ ${ fb_components.menubar() }
           
           <button class="btn fileToolbarBtn" title="${_('Restore from trash')}" data-bind="visible: inRestorableTrash(), click: restoreTrashSelected, enable: selectedFiles().length > 0 && isCurrentDirSelected().length == 0"><i class="fa fa-cloud-upload"></i> ${_('Restore')}</button>
           <!-- ko ifnot: inTrash -->
+          <!-- ko if: $root.isS3 -->
+          <button class="btn fileToolbarBtn delete-link" title="${_('Delete forever')}" data-bind="enable: selectedFiles().length > 0, click: deleteSelected"><i class="fa fa-bolt"></i> ${_('Delete forever')}</button>
+          <!-- /ko -->
+          <!-- ko ifnot: $root.isS3 -->
           <div id="delete-dropdown" class="btn-group" style="vertical-align: middle">
             <button id="trash-btn" class="btn toolbarBtn" data-bind="enable: selectedFiles().length > 0 && isCurrentDirSelected().length == 0, click: trashSelected"><i class="fa fa-times"></i> ${_('Move to trash')}</button>
             <button id="trash-btn-caret" class="btn toolbarBtn dropdown-toggle" data-toggle="dropdown" data-bind="enable: selectedFiles().length > 0 && isCurrentDirSelected().length == 0">
@@ -99,6 +102,7 @@ ${ fb_components.menubar() }
               <li><a href="#" class="delete-link" title="${_('Delete forever')}" data-bind="enable: selectedFiles().length > 0, click: deleteSelected"><i class="fa fa-bolt"></i> ${_('Delete forever')}</a></li>
             </ul>
           </div>
+          <!-- /ko -->
           <!-- /ko -->
           % if 'oozie' in apps:
           <button class="btn fileToolbarBtn" title="${_('Submit')}"
@@ -114,7 +118,7 @@ ${ fb_components.menubar() }
         <div class="btn-toolbar" style="display: inline; vertical-align: middle">
           % if show_upload_button:
           <div id="upload-dropdown" class="btn-group" style="vertical-align: middle">
-            <a href="#" class="btn upload-link dropdown-toggle" title="${_('Upload')}" data-toggle="dropdown" data-bind="visible: !inTrash()">
+            <a href="#" class="btn upload-link dropdown-toggle" title="${_('Upload')}" data-toggle="dropdown" data-bind="visible: !inTrash(), css: {'disabled': isS3() && isS3Root()}">
               <i class="fa fa-arrow-circle-o-up"></i> ${_('Upload')}
               <span class="caret"></span>
             </a>
@@ -130,8 +134,8 @@ ${ fb_components.menubar() }
               <span class="caret"></span>
             </a>
             <ul class="dropdown-menu pull-right" style="top: auto">
-              <li><a href="#" class="create-file-link" title="${_('File')}"><i class="fa fa-file-o"></i> ${_('File')}</a></li>
-              <li><a href="#" class="create-directory-link" title="${_('Directory')}"><i class="fa fa-folder"></i> ${_('Directory')}</a></li>
+              <li data-bind="visible: !isS3() || isS3() && !isS3Root()"><a href="#" class="create-file-link" title="${_('File')}"><i class="fa fa-file-o"></i> ${_('File')}</a></li>
+              <li><a href="#" class="create-directory-link" title="${_('Directory')}"><i class="fa fa-folder"></i> <span data-bind="visible: !isS3() || isS3() && !isS3Root()">${_('Directory')}</span><span data-bind="visible: isS3() && isS3Root()">${_('Bucket')}</span></a></li>
             </ul>
           </div>
         </div>
@@ -164,6 +168,8 @@ ${ fb_components.menubar() }
 
 <div class="hoverMsg hide">
   <p class="hoverText"></p>
+</div>
+
 </div>
 
 

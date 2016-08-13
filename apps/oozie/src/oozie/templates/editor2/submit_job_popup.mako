@@ -66,7 +66,7 @@
                     </a>
                   </li>
                 </ul>
-                </div>
+              </div>
             </div>
           </div>
 
@@ -78,6 +78,9 @@
          <label class="checkbox" style="display: inline-block; margin-top: 5px">
            <input type="checkbox" name="dryrun_checkbox" /> ${ _('Do a dryrun before submitting the job?') }
          </label>
+      % endif
+      % if return_json:
+        <input type="hidden" name="format" value="json">
       % endif
   </div>
   <div class="modal-footer">
@@ -119,7 +122,6 @@
   }
 </style>
 
-<script src="${ static('desktop/ext/js/moment-with-locales.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/bootstrap-datepicker.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/bootstrap-timepicker.min.js') }" type="text/javascript" charset="utf-8"></script>
 
@@ -155,4 +157,19 @@
     });
    _el.datepicker('show');
   });
+
+  % if return_json:
+    $('.submit-form').submit(function (e) {
+      $.ajax({
+        type: "POST",
+        url: '${ action }',
+        data: $('.submit-form').serialize(),
+        success: function (data) {
+          huePubSub.publish('submit.popup.return', data);
+        }
+      });
+      e.preventDefault();
+    });
+  % endif
+
 </script>

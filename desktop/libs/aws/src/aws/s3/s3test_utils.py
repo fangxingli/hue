@@ -39,10 +39,9 @@ def generate_id(size=6, chars=string.ascii_uppercase + string.digits):
 
 
 class S3TestBase(unittest.TestCase):
+
   @classmethod
   def setUpClass(cls):
-    raise SkipTest()
-
     cls.bucket_name = get_test_bucket()
 
     cls._should_skip = False
@@ -61,7 +60,7 @@ class S3TestBase(unittest.TestCase):
 
   def setUp(self):
     if self.shouldSkip():
-      raise self.skipTest(self._skip_msg)
+      raise SkipTest(self._skip_msg)
 
   @classmethod
   def tearDownClass(cls):

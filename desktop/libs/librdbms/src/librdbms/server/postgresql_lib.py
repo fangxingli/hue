@@ -132,3 +132,8 @@ class PostgreSQLClient(BaseRDMSClient):
     else:
       columns = [dict(name=row[0], type=row[1], comment='') for row in cursor.fetchall()]
     return columns
+
+  def get_sample_data(self, database, table, column=None, limit=100):
+    column = '"%s"' % column if column else '*'
+    statement = 'SELECT %s FROM "%s"."%s" LIMIT %d' % (column, database, table, limit)
+    return self.execute_statement(statement)

@@ -192,6 +192,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
             <div id="queryColumn" class="span9">
               <a id="navigatorShow" href="#" title="${_('Show the assist')}" style="position:absolute;z-index: 10000; margin-top:10px;display:none;right:30px" rel="tooltip" data-placement="left"><i class="fa fa-compass"></i></a>
               <form id="queryForm">
+                ${ csrf_token(request) | n,unicode }
                 <textarea id="scriptEditor" data-bind="text:currentScript().script"></textarea>
               </form>
             </div>
@@ -346,6 +347,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
             <h3><span data-bind="text: currentScript().name"></span></h3>
           </div>
           <form class="form-inline" style="padding-left: 10px">
+            ${ csrf_token(request) | n,unicode }
             <label>
               ${ _('Script name') } &nbsp;
               <input type="text" id="scriptName" class="input-xlarge" data-bind="value: currentScript().name, valueUpdate:'afterkeydown'" />
@@ -735,7 +737,7 @@ ${ commonshare() | n,unicode }
 <script src="${ static('pig/js/utils.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('pig/js/pig.ko.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/js/share.vm.js') }" type="text/javascript" charset="utf-8"></script>
-<script src="${ static('desktop/js/assist/assistHelper.js') }" type="text/javascript" charset="utf-8"></script>
+<script src="${ static('desktop/js/apiHelper.js') }" type="text/javascript" charset="utf-8"></script>
 
 <script src="${ static('desktop/ext/js/routie-0.3.0.min.js') }" type="text/javascript" charset="utf-8"></script>
 <script src="${ static('desktop/ext/js/codemirror-3.11.js') }"></script>
@@ -953,7 +955,7 @@ ${ commonshare() | n,unicode }
         CodeMirror.isHCatHint = false;
         CodeMirror.showHint(codeMirror, CodeMirror.pigHint);
       }
-    }
+    };
     codeMirror = CodeMirror(function (elt) {
       scriptEditor.parentNode.replaceChild(elt, scriptEditor);
     }, {
@@ -1028,10 +1030,10 @@ ${ commonshare() | n,unicode }
     var availableTables = '';
 
     % if autocomplete_base_url != '':
-      var assistHelper = AssistHelper.getInstance({
+      var apiHelper = ApiHelper.getInstance({
         user: '${ user }'
       });
-      assistHelper.fetchTables({
+      apiHelper.fetchTables({
         successCallback: function (data) {
           if (data && data.status == 0 && data.tables_meta) {
             availableTables = data.tables_meta.map(function (t) {
@@ -1203,17 +1205,28 @@ ${ commonshare() | n,unicode }
     function refreshLogs() {
       if (viewModel.currentScript().watchUrl() != "") {
         $.getJSON(viewModel.currentScript().watchUrl(), function (data) {
-          if (data.logs.pig) {
+          var logs = data.logs.pig || '';
+          if (data.workflow && data.workflow.actions) {
+            data.workflow.actions.forEach(function (action) {
+              if (data.logs[action.name]) {
+                if (logs !== '') {
+                  logs += '\n';
+                }
+                logs += data.logs[action.name];
+              }
+            });
+          }
+          if (logs !== '') {
             if ($("#withLogs").is(":hidden")) {
               $("#withoutLogs").addClass("hide");
               $("#withLogs").removeClass("hide");
               resizeLogs();
             }
             var _logsEl = $("#withLogs");
-            var newLines = data.logs.pig.split("\n").slice(_logsEl.html().split("<br>").length);
-            if (newLines.length > 0){
-              _logsEl.html(_logsEl.html() + newLines.join("<br>") + "<br>");
-              checkForErrors(newLines);
+            var lines = logs.split("\n");
+            if (lines.length > 0){
+              _logsEl.html(lines.join("<br>") + "<br>");
+              checkForErrors(lines);
             }
             window.setTimeout(function () {
               resizeLogs();

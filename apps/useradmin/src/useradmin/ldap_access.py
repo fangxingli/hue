@@ -101,7 +101,10 @@ def get_or_create_ldap_user(username):
   if users.exists():
     return User.objects.get(**username_kwargs), False
   else:
-    username = desktop.conf.LDAP.FORCE_USERNAME_LOWERCASE.get() and username.lower() or username
+    if desktop.conf.LDAP.FORCE_USERNAME_LOWERCASE.get():
+      username = username.lower()
+    elif desktop.conf.LDAP.FORCE_USERNAME_UPPERCASE.get():
+      username = username.upper()
     return User.objects.create(username=username), True
 
 
@@ -232,6 +235,8 @@ class LdapConnection(object):
           group_name = data[group_name_attr][0]
           if desktop.conf.LDAP.FORCE_USERNAME_LOWERCASE.get():
             group_name = group_name.lower()
+          elif desktop.conf.LDAP.FORCE_USERNAME_UPPERCASE.get():
+            group_name = group_name.upper()
 
           ldap_info = {
             'dn': dn,
@@ -291,7 +296,11 @@ class LdapConnection(object):
     sanitized_name = sanitized_name.replace(r'\5c,', r'\2c')
 
     search_dn, user_name_filter = self._get_search_params(sanitized_name, search_attr, find_by_dn)
-    ldap_filter = '(&' + user_filter + user_name_filter + ')'
+    ldap_filter = user_filter
+    if user_name_filter:
+      if ldap_filter.lower() in ('(objectclass=*)', 'objectclass=*'):
+        ldap_filter = ''
+      ldap_filter = '(&' + ldap_filter + user_name_filter + ')'
     attrlist = ['objectClass', 'isMemberOf', 'memberOf', 'givenName', 'sn', 'mail', 'dn', user_name_attr]
 
     ldap_result_id = self.ldap_handle.search(search_dn, scope, ldap_filter, attrlist)

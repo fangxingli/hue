@@ -20,7 +20,7 @@ import itertools
 import json
 import re
 
-from itertools import imap
+from itertools import imap, izip
 from operator import itemgetter
 
 from django.utils.translation import ugettext as _
@@ -147,6 +147,12 @@ class HiveServerTable(Table):
     return rows[col_row_index:][:end_cols_index]
 
   @property
+  def storage_details(self):
+    rows = self.properties
+    col_row_index = map(itemgetter('col_name'), rows).index('Storage Desc Params:') + 1
+    return rows[col_row_index:][:col_row_index + 2]
+
+  @property
   def has_complex(self):
     has_complex = False
     complex_types = ["struct", "array", "map", "uniontype"]
@@ -168,15 +174,15 @@ class HiveServerTable(Table):
     if self._details is None:
       props = dict([(stat['col_name'], stat['data_type']) for stat in self.properties if stat['col_name'] != 'Table Parameters:'])
       serde = props.get('SerDe Library:', '')
-      
+
       self._details = {
           'stats': dict([(stat['data_type'], stat['comment']) for stat in self.stats]),
           'properties': {
             'owner': props.get('Owner:'),
             'create_time': props.get('CreateTime:'),
             'compressed': props.get('Compressed:', 'No') != 'No',
-            'format': 'parquet' if 'ParquetHiveSerDe' in serde else ('text' if 'LazySimpleSerDe' in serde else serde.rsplit('.', 1)[-1])
-        } 
+            'format': 'parquet' if 'ParquetHiveSerDe' in serde else ('text' if 'LazySimpleSerDe' in serde else serde.rsplit('.', 1)[-1]),
+        }
       }
 
     return self._details
@@ -467,8 +473,10 @@ class HiveServerClient:
     self.user = user
 
     use_sasl, mechanism, kerberos_principal_short_name, impersonation_enabled, auth_username, auth_password = self.get_security()
-    LOG.info('use_sasl=%s, mechanism=%s, kerberos_principal_short_name=%s, impersonation_enabled=%s, auth_username=%s' % (
-             use_sasl, mechanism, kerberos_principal_short_name, impersonation_enabled, auth_username))
+    LOG.info(
+        '%s: use_sasl=%s, mechanism=%s, kerberos_principal_short_name=%s, impersonation_enabled=%s, auth_username=%s' % (
+        self.query_server['server_name'], use_sasl, mechanism, kerberos_principal_short_name, impersonation_enabled, auth_username)
+    )
 
     self.use_sasl = use_sasl
     self.kerberos_principal_short_name = kerberos_principal_short_name
@@ -568,9 +576,6 @@ class HiveServerClient:
 
     if self.query_server['server_name'] == 'beeswax': # All the time
       kwargs['configuration'].update({'hive.server2.proxy.user': user.username})
-      # kwargs['configuration'].update({'hive.server2.logging.operation.verbose': 'true'})
-      # kwargs['configuration'].update({'hive.server2.logging.operation.level': 'VERBOSE'})
-
     if self.query_server['server_name'] == 'sparksql': # All the time
       kwargs['configuration'].update({'hive.server2.proxy.user': user.username})
 
@@ -722,8 +727,21 @@ class HiveServerClient:
     else:
       query = 'DESCRIBE FORMATTED `%s`.`%s`' % (database, table_name)
 
-    (desc_results, desc_schema), operation_handle = self.execute_statement(query, max_rows=10000, orientation=TFetchOrientation.FETCH_NEXT)
-    self.close_operation(operation_handle)
+    try:
+      (desc_results, desc_schema), operation_handle = self.execute_statement(query, max_rows=10000, orientation=TFetchOrientation.FETCH_NEXT)
+      self.close_operation(operation_handle)
+    except Exception, e:
+      if 'cannot find field' in str(e): # Workaround until Hive 2.0 and HUE-3751
+        (desc_results, desc_schema), operation_handle = self.execute_statement('USE `%s`' % database)
+        self.close_operation(operation_handle)
+        if partition_spec:
+          query = 'DESCRIBE FORMATTED ``%s` PARTITION(%s)' % (table_name, partition_spec)
+        else:
+          query = 'DESCRIBE FORMATTED `%s`' % table_name
+        (desc_results, desc_schema), operation_handle = self.execute_statement(query, max_rows=10000, orientation=TFetchOrientation.FETCH_NEXT)
+        self.close_operation(operation_handle)
+      else:
+        raise e
 
     return HiveServerTable(table_results.results, table_schema.schema, desc_results.results, desc_schema.schema)
 
@@ -861,14 +879,39 @@ class HiveServerClient:
     table = self.get_table(database, table_name)
 
     query = 'SHOW PARTITIONS `%s`.`%s`' % (database, table_name)
-    if partition_spec:
+    if self.query_server['server_name'] == 'beeswax' and partition_spec:
       query += ' PARTITION(%s)' % partition_spec
 
     # We fetch N partitions then reverse the order later and get the max_parts. Use partition_spec to refine more the initial list.
     # Need to fetch more like this until SHOW PARTITIONS offers a LIMIT and ORDER BY
-    partition_table = self.execute_query_statement(query, max_rows=10000)
+    partition_table = self.execute_query_statement(query, max_rows=10000, orientation=TFetchOrientation.FETCH_NEXT)
 
-    partitions = [PartitionValueCompatible(partition, table) for partition in partition_table.rows()]
+    if self.query_server['server_name'] == 'impala':
+      try:
+        # Fetch all partition key names, which are listed before the #Rows column
+        cols = [col.name for col in partition_table.cols()]
+        stop = cols.index('#Rows')
+        partition_keys = cols[:stop]
+        num_parts = len(partition_keys)
+
+        # Get all partition values
+        rows = partition_table.rows()
+        partition_values = [partition[:num_parts] for partition in rows]
+
+        # Truncate last row which is the Total
+        partition_values = partition_values[:-1]
+        partitions_formatted = []
+
+        # Format partition key and values into Hive format: [key1=val1/key2=value2]
+        for values in partition_values:
+          zipped_parts = izip(partition_keys, values)
+          partitions_formatted.append(['/'.join(['%s=%s' % (part[0], part[1]) for part in zipped_parts])])
+
+        partitions = [PartitionValueCompatible(partition, table) for partition in partitions_formatted]
+      except Exception, e:
+        raise ValueError(_('Failed to determine partition keys for Impala table: `%s`.`%s`') % (database, table_name))
+    else:
+      partitions = [PartitionValueCompatible(partition, table) for partition in partition_table.rows()]
 
     if reverse_sort:
       partitions.reverse()
@@ -939,6 +982,9 @@ class ResultCompatible:
   def cols(self):
     return [col.name for col in self.data_table.cols()]
 
+  def full_cols(self):
+    return [{'name': col.name, 'type': col.type, 'comment': col.comment} for col in self.data_table.cols()]
+
 
 class PartitionKeyCompatible:
 
@@ -965,7 +1011,7 @@ class PartitionValueCompatible:
     # Parses: ['datehour=2013022516'] or ['month=2011-07/dt=2011-07-01/hr=12']
     partition = partition_row[0]
     parts = partition.split('/')
-    self.partition_spec = ','.join(["%s='%s'" % (pv[0], pv[1]) for pv in [part.split('=') for part in parts]])
+    self.partition_spec = ','.join(["`%s`='%s'" % (pv[0], pv[1]) for pv in [part.split('=') for part in parts]])
     self.values = [pv[1] for pv in [part.split('=') for part in parts]]
     self.sd = type('Sd', (object,), properties,)
 

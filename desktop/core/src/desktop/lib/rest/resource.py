@@ -63,7 +63,8 @@ class Resource(object):
     else:
       return resp.content
 
-  def invoke(self, method, relpath=None, params=None, data=None, headers=None, files=None, allow_redirects=False):
+  def invoke(self, method, relpath=None, params=None, data=None, headers=None, files=None, allow_redirects=False,
+             clear_cookies=False):
     """
     Invoke an API method.
     @return: Raw body or JSON dictionary (if response content type is JSON).
@@ -76,41 +77,45 @@ class Resource(object):
                                 headers=headers,
                                 files=files,
                                 allow_redirects=allow_redirects,
-                                urlencode=self._urlencode)
+                                urlencode=self._urlencode,
+                                clear_cookies=clear_cookies)
 
     if self._client.logger.isEnabledFor(logging.DEBUG):
       self._client.logger.debug(
           "%s Got response: %s%s" %
           (method,
-           smart_unicode(resp.content[:32], errors='replace'),
-           len(resp.content) > 32 and "..." or ""))
+           smart_unicode(resp.content[:1000], errors='replace'),
+           len(resp.content) > 1000 and "..." or ""))
 
     return self._format_response(resp)
 
-  def get(self, relpath=None, params=None, headers=None):
+  def get(self, relpath=None, params=None, headers=None, clear_cookies=False):
     """
     Invoke the GET method on a resource.
     @param relpath: Optional. A relative path to this resource's path.
     @param params: Key-value data.
+    @param clear_cookies: Optional. A flag to force any session cookies to be reset on the request.
 
     @return: A dictionary of the JSON result.
     """
-    return self.invoke("GET", relpath, params, headers=headers, allow_redirects=True)
+    return self.invoke("GET", relpath, params, headers=headers, allow_redirects=True, clear_cookies=clear_cookies)
 
 
-  def delete(self, relpath=None, params=None, headers=None):
+  def delete(self, relpath=None, params=None, headers=None, clear_cookies=False):
     """
     Invoke the DELETE method on a resource.
     @param relpath: Optional. A relative path to this resource's path.
     @param params: Key-value data.
     @param headers: Optional. Base set of headers.
+    @param clear_cookies: Optional. A flag to force any session cookies to be reset on the request.
 
     @return: A dictionary of the JSON result.
     """
-    return self.invoke("DELETE", relpath, params, headers=headers)
+    return self.invoke("DELETE", relpath, params, headers=headers, clear_cookies=clear_cookies)
 
 
-  def post(self, relpath=None, params=None, data=None, contenttype=None, headers=None, files=None):
+  def post(self, relpath=None, params=None, data=None, contenttype=None, headers=None, files=None, allow_redirects=False,
+           clear_cookies=False):
     """
     Invoke the POST method on a resource.
     @param relpath: Optional. A relative path to this resource's path.
@@ -118,23 +123,29 @@ class Resource(object):
     @param data: Optional. Body of the request.
     @param contenttype: Optional.
     @param headers: Optional. Base set of headers.
+    @param allow_redirects: Optional. Allow request to automatically resolve redirects.
+    @param clear_cookies: Optional. A flag to force any session cookies to be reset on the request.
 
     @return: A dictionary of the JSON result.
     """
-    return self.invoke("POST", relpath, params, data, self._make_headers(contenttype, headers), files)
+    return self.invoke("POST", relpath, params, data, headers=self._make_headers(contenttype, headers), files=files,
+                       allow_redirects=allow_redirects, clear_cookies=clear_cookies)
 
 
-  def put(self, relpath=None, params=None, data=None, contenttype=None):
+  def put(self, relpath=None, params=None, data=None, contenttype=None, allow_redirects=False, clear_cookies=False):
     """
     Invoke the PUT method on a resource.
     @param relpath: Optional. A relative path to this resource's path.
     @param params: Key-value data.
     @param data: Optional. Body of the request.
     @param contenttype: Optional.
+    @param allow_redirects: Optional. Allow request to automatically resolve redirects.
+    @param clear_cookies: Optional. A flag to force any session cookies to be reset on the request.
 
     @return: A dictionary of the JSON result.
     """
-    return self.invoke("PUT", relpath, params, data, self._make_headers(contenttype))
+    return self.invoke("PUT", relpath, params, data, headers=self._make_headers(contenttype),
+                       allow_redirects=allow_redirects, clear_cookies=clear_cookies)
 
 
   def _make_headers(self, contenttype=None, headers=None):

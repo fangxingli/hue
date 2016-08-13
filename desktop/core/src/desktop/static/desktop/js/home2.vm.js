@@ -18,29 +18,43 @@
   if(typeof define === "function" && define.amd) {
     define([
       'knockout',
-      'desktop/js/assist/assistHelper',
+      'desktop/js/apiHelper',
       'desktop/js/fileBrowser/hueFileEntry',
       'knockout-mapping'
     ], factory);
   } else {
-    root.HomeViewModel = factory(ko, assistHelper, HueFileEntry);
+    root.HomeViewModel = factory(ko, apiHelper, HueFileEntry);
   }
-}(this, function (ko, AssistHelper, HueFileEntry) {
+}(this, function (ko, ApiHelper, HueFileEntry) {
 
+
+  /**
+   * @param {Object} options
+   * @param {string} options.user
+   * @param {Object} options.i18n
+   *
+   * @constructor
+   */
   function HomeViewModel(options) {
     var self = this;
 
-    self.assistHelper = AssistHelper.getInstance(options);
-    self.isLeftPanelVisible = ko.observable();
-    self.assistHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
+    self.user = options.user;
+    self.superuser = options.superuser;
+    self.apiHelper = ApiHelper.getInstance(options);
+    self.isLeftPanelVisible = ko.observable(false);
+    // Uncomment to enable the assist panel
+    // self.apiHelper.withTotalStorage('assist', 'assist_panel_visible', self.isLeftPanelVisible, true);
 
     self.activeEntry = ko.observable();
     self.trashEntry = ko.observable();
     self.activeEntry(new HueFileEntry({
       activeEntry: self.activeEntry,
       trashEntry: self.trashEntry,
-      assistHelper: self.assistHelper,
+      apiHelper: self.apiHelper,
       app: 'documents',
+      user: self.user,
+      superuser: self.superuser,
+      activeSort: ko.observable('defaultAsc'),
       definition: {
         name: '/'
       }
@@ -57,19 +71,16 @@
 
   HomeViewModel.prototype.openUuid = function (uuid) {
     var self = this;
-    self.activeEntry(undefined);
-    var entry = new HueFileEntry({
-      activeEntry: self.activeEntry,
-      trashEntry: self.trashEntry,
-      assistHelper: self.assistHelper,
-      app: 'documents',
+    var entry = self.activeEntry().createNewEntry({
       definition: {
         uuid: location.getParameter('uuid'),
         name: 'unknown',
         type: 'directory',
         path: '/unknown'
-      }
+      },
+      parent: null
     });
+    self.activeEntry(undefined);
 
     var lastParent = entry;
 
@@ -89,18 +100,15 @@
     var self = this;
     var parts = path.split('/');
     parts.shift(); // Remove root
-    self.activeEntry(undefined);
-    var lastChild = new HueFileEntry({
-      activeEntry: self.activeEntry,
-      trashEntry: self.trashEntry,
-      assistHelper: self.assistHelper,
-      app: 'documents',
+    var lastChild = self.activeEntry().createNewEntry({
       definition: {
         name: '',
         type: 'directory',
         path: '/'
-      }
+      },
+      parent: null
     });
+    self.activeEntry(undefined);
 
     var loadDeep = function () {
       if (parts.length > 0) {

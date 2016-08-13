@@ -59,9 +59,26 @@
       $element.addClass("draggableText");
 
       var $helper = $("<div>").text(ko.isObservable(options.text) ? options.text() : options.text).css("z-index", "99999");
+      var dragStartX = -1;
+      var dragStartY = -1;
       $element.draggable({
         helper: function () { return $helper },
-        appendTo: "body"
+        appendTo: "body",
+        start: function (event) {
+          dragStartX = event.clientX;
+          dragStartY = event.clientY;
+          huePubSub.publish('draggable.text.meta', options.meta);
+        },
+        stop: function (event) {
+          if (Math.sqrt((dragStartX-event.clientX)*(dragStartX-event.clientX) + (dragStartY-event.clientY)*(dragStartY-event.clientY)) < 10) {
+            $helper.remove();
+            var elementAtStart = document.elementFromPoint(dragStartX, dragStartY);
+            var elementAtStop = document.elementFromPoint(event.clientX, event.clientY);
+            if (elementAtStart === elementAtStop) {
+              $(elementAtStop).trigger('click');
+            }
+          }
+        },
       });
     }
   };
@@ -122,20 +139,22 @@
       var $element  = $(element);
 
       var selector = options.selector;
+      var showTimeout = -1;
       var hideTimeout = -1;
       ko.utils.domData.set(element, 'visibleOnHover.override', ko.utils.unwrapObservable(options.override) || false)
       var inside = false;
 
       var show = function () {
-        $element.find(selector).fadeTo("normal", 1);
-        clearTimeout(hideTimeout);
+        $element.find(selector).fadeTo("fast", 1);
+        window.clearTimeout(hideTimeout);
       };
 
       var hide = function () {
         if (! inside) {
+          window.clearTimeout(showTimeout);
           hideTimeout = window.setTimeout(function () {
-            $element.find(selector).fadeTo("normal", 0);
-          }, 50);
+            $element.find(selector).fadeTo("fast", 0);
+          }, 10);
         }
       };
 
@@ -147,11 +166,14 @@
       }
 
       $element.mouseenter(function () {
-        inside = true;
-        show();
+        showTimeout = window.setTimeout(function () {
+          inside = true;
+          show();
+        }, 300);
       });
 
       $element.mouseleave(function () {
+        window.clearTimeout(showTimeout);
         inside = false;
         if (! ko.utils.domData.get(element, 'visibleOnHover.override')) {
           hide();
@@ -239,11 +261,62 @@
    *
    */
   ko.bindingHandlers.contextMenu = {
+    initContextMenu: function ($menu, $scrollContainer) {
+      var active = false;
+
+      var currentLeft = 0;
+      var currentTop = 0;
+      var openScrollTop = 0;
+      var openScrollLeft = 0;
+
+      var adjustForScroll = function () {
+        $menu.css('top', currentTop - $scrollContainer.scrollTop() + openScrollTop);
+        $menu.css('left', currentLeft - $scrollContainer.scrollLeft() + openScrollLeft);
+      }
+
+      return {
+        show: function (event) {
+          $menu.css('top', 0);
+          $menu.css('left', 0);
+          $menu.css('opacity', 0);
+          $menu.show();
+          openScrollTop = $scrollContainer.scrollTop();
+          openScrollLeft = $scrollContainer.scrollLeft();
+          var menuWidth = $menu.outerWidth(true)
+          if (event.clientX + menuWidth > $(window).width()) {
+            currentLeft = $(window).width() - menuWidth
+          } else {
+            currentLeft = event.clientX;
+          }
+          $menu.css('left', currentLeft);
+
+          var menuHeight = $menu.outerHeight(true);
+          if (event.clientY + menuHeight > $(window).height()) {
+            currentTop = $(window).height() - menuHeight;
+          } else {
+            currentTop = event.clientY;
+          }
+          $menu.css('top', currentTop);
+          $menu.css('opacity', 1);
+          active = true;
+          $scrollContainer.on('scroll', adjustForScroll);
+        },
+        hide: function () {
+          if (active) {
+            $scrollContainer.off('scroll', adjustForScroll);
+            $menu.css('opacity', 0);
+            window.setTimeout(function () {
+              $menu.hide();
+            }, 300);
+            active = false;
+          }
+        }
+      }
+    },
     init: function (element, valueAccessor, allBindings, viewModel, bindingContext) {
       var $element = $(element);
       var options = valueAccessor();
       var $menu = $element.find(options.menuSelector);
-      var active = false;
 
       bindingContext.$altDown = ko.observable(false);
 
@@ -255,7 +328,11 @@
         bindingContext.$altDown(false);
       });
 
-      element.addEventListener("contextmenu", function(e) {
+      var $scrollContainer = $(options.scrollContainer).length > 0 ? $(options.scrollContainer) : $(window);
+
+      var menu = ko.bindingHandlers.contextMenu.initContextMenu($menu, $scrollContainer);
+
+      element.addEventListener("contextmenu", function(event) {
         if(document.selection && document.selection.empty) {
           document.selection.empty();
         } else if(window.getSelection) {
@@ -265,54 +342,29 @@
         if (typeof options.beforeOpen === 'function') {
           options.beforeOpen.bind(viewModel)();
         }
-        $menu.css('top', 0);
-        $menu.css('left', 0);
-        $menu.css('opacity', 0);
-        $menu.show();
-        var menuWidth = $menu.outerWidth(true)
-        if (event.clientX + menuWidth > $(window).width()) {
-          $menu.css('left', event.clientX - menuWidth);
-        } else {
-          $menu.css('left', event.clientX);
-        }
-
-        var menuHeight = $menu.outerHeight(true);
-        if (event.clientY + menuHeight > $(window).height()) {
-          $menu.css('top', $(window).height() - menuHeight);
-        } else {
-          $menu.css('top', event.clientY);
-        }
-        $menu.css('opacity', 1);
-        active = true;
+        menu.show(event);
         huePubSub.publish('contextmenu-active', element);
-        e.preventDefault();
-        e.stopPropagation();
+        event.preventDefault();
+        event.stopPropagation();
       });
-
-      var hideMenu = function () {
-        if (active) {
-          $menu.css('opacity', 0);
-          window.setTimeout(function () {
-            $menu.hide();
-          }, 300);
-          active = false;
-        }
-      };
 
       huePubSub.subscribe('contextmenu-active', function (origin) {
         if (origin !== element) {
-          hideMenu();
+          menu.hide();
         }
       });
       document.addEventListener("contextmenu", function (event) {
-        hideMenu();
+        menu.hide();
       });
       $menu.click(function (e) {
-        hideMenu();
+        menu.hide();
         e.stopPropagation();
       });
-      $element.click(hideMenu);
-      $(document).click(hideMenu);
+      $(document).click(function (event) {
+        if ($element.find($(event.target)).length === 0) {
+          menu.hide();
+        };
+      });
     }
   };
 
@@ -340,13 +392,13 @@
             clickedOnce = false;
             clearTimeout(singleClickTimeout);
             clearTimeout(dblClickTimeout);
-          } else {
+          } else if (clickHandlerFunction) {
             clickedOnce = true;
             singleClickTimeout = window.setTimeout(function() {
               clickHandlerFunction.apply(viewModel, clickArgs);
               dblClickTimeout = window.setTimeout(function() {
                 clickedOnce = false;
-              }, 275);
+              }, 100);
             }, 225);
           }
         }
@@ -357,7 +409,7 @@
   };
 
   ko.bindingHandlers.logScroller = {
-    init: function (element, valueAccessor) {
+    init: function (element, valueAccessor, allBindings) {
       var $element = $(element);
 
       $element.on("scroll", function () {
@@ -383,6 +435,12 @@
       logValue.subscribe(function () {
         window.setTimeout(autoLogScroll, 200);
       });
+
+      if (typeof allBindings().logScrollerVisibilityEvent !== 'undefined'){
+        allBindings().logScrollerVisibilityEvent.subscribe(function () {
+          window.setTimeout(autoLogScroll, 0);
+        });
+      }
 
       autoLogScroll();
     }
@@ -491,9 +549,16 @@
       var hidePopover = function () {
         $element.popover('hide');
         visible = false;
+        $(document).off('click', hideOnClickOutside)
       };
 
       huePubSub.subscribe('close.popover', hidePopover);
+
+      var hideOnClickOutside = function (event) {
+        if (visible && $element.data('popover') && ! $.contains($element.data('popover').$tip[0], event.target)) {
+          hidePopover();
+        }
+      }
 
       var showPopover = function () {
         ko.renderTemplate(options.contentTemplate, viewModel, {
@@ -513,6 +578,7 @@
                 }
                 $content.empty();
                 $title.empty();
+                $(document).on('click', hideOnClickOutside)
                 visible = true;
               }
             }, $title.get(0), 'replaceChildren');
@@ -521,12 +587,13 @@
       };
 
       if (clickTrigger) {
-        $element.click(function () {
+        $element.click(function (e) {
           if (visible) {
             hidePopover();
           } else {
             showPopover();
           }
+          e.stopPropagation();
         });
       } else {
         $element.mouseenter(showPopover);
@@ -1138,7 +1205,8 @@
       var timeout = -1;
       var checkForElements = function () {
         var $allPanels = $container.children('.assist-inner-panel');
-        if (panelDefinitions().length == $allPanels.length) {
+        var $allExtras = $container.children('.assist-fixed-height');
+        if (panelDefinitions().length == $allPanels.length && ($allExtras.length > 0 || options.noFixedHeights)) {
           ko.bindingHandlers.assistVerticalResizer.updateWhenRendered(element, valueAccessor);
         } else {
           timeout = window.setTimeout(checkForElements, 10);
@@ -1154,7 +1222,7 @@
     updateWhenRendered: function (element, valueAccessor) {
       var self = this;
       var options = ko.unwrap(valueAccessor());
-      var assistHelper = options.assistHelper;
+      var apiHelper = options.apiHelper;
       var panelDefinitions = options.panels;
 
       var $container = $(element);
@@ -1167,14 +1235,21 @@
         allExtrasHeight += $(extra).outerHeight(true);
       });
 
+      window.clearInterval($container.data('height_interval'));
+
       if (panelDefinitions().length === 0) {
         $allExtras.show();
+        return;
       }
       if (panelDefinitions().length === 1) {
         var adjustHeightSingle = function () {
           $allPanels.height($container.innerHeight() - allExtrasHeight);
-        }
-        window.setTimeout(adjustHeightSingle, 200);
+        };
+
+        var heightAdjustInterval = window.setInterval(adjustHeightSingle, 800);
+        adjustHeightSingle();
+        $container.data('height_interval', heightAdjustInterval);
+
         $(window).resize(adjustHeightSingle);
         huePubSub.subscribe('assist.forceRender', function () {
           window.setTimeout(adjustHeightSingle, 200);
@@ -1184,7 +1259,7 @@
         return;
       }
 
-      var panelRatios = assistHelper.getFromTotalStorage('assist', 'innerPanelRatios', {});
+      var panelRatios = apiHelper.getFromTotalStorage('assist', 'innerPanelRatios', {});
 
       var totalRatios = 0;
       $.each($allPanels, function (idx, panel) {
@@ -1249,6 +1324,7 @@
             }
           });
         }
+        $('.assist-flex-fill').getNiceScroll().resize();
       };
 
       resizeByRatio();
@@ -1348,8 +1424,8 @@
             $allPanels.each(function (idx, panel) {
               panelRatios[panelDefinitions()[idx].type] = $(panel).outerHeight(true) / totalHeightForPanels;
             });
-            assistHelper.setInTotalStorage('assist', 'innerPanelRatios', panelRatios);
-            $('.ps-container').perfectScrollbar('update');
+            apiHelper.setInTotalStorage('assist', 'innerPanelRatios', panelRatios);
+            $('.assist-flex-fill').getNiceScroll().resize();
           }
         });
       });
@@ -1362,29 +1438,49 @@
       var ace = options.ace;
       var $target = $(options.target);
       var $resizer = $(element);
+      var $rightPanel = $(".right-panel");
+      var $execStatus = $resizer.prev('.snippet-execution-status');
 
-      var lastEditorHeight = 7;
+      var lastEditorSize = $.totalStorage('hue.editor.editor.size') || 128;
+      var editorHeight = Math.floor(lastEditorSize / 16);
+      $target.height(lastEditorSize);
+      var autoExpand = true;
 
-      var autoExpandTimeout = window.setInterval(function () {
-        var chunks = Math.floor((Math.max(ace().session.getLength(), 4) - lastEditorHeight) / 4);
-        if (chunks !== 0) {
-          if (ace().session.getLength() < 2000) {
-            $target.height($target.height() + 64 * chunks);
+      ace().on('change', function () {
+        if (autoExpand) {
+          var maxAutoLines = Math.floor((($(window).height() - 80) / 2) / 16);
+          var resized = false;
+          if (ace().session.getLength() > editorHeight) {
+            if (ace().session.getLength() < maxAutoLines) {
+              $target.height(ace().session.getLength() * 16);
+            }
+            else {
+              $target.height(maxAutoLines * 16); // height of maxAutoLines
+            }
+            resized = true;
+          }
+          else if (ace().session.getLength() > 8) {
+            $target.height((ace().session.getLength()) * 16);
+            resized = true;
           }
           else {
-            $target.height(2000 * 16); // height of 2000 lines
+            $target.height(8 * 16);
+            resized = true;
           }
-          ace().resize();
-          lastEditorHeight += 4 * chunks;
+          if (resized) {
+            ace().resize();
+            editorHeight = Math.min(maxAutoLines, ace().session.getLength());
+            huePubSub.publish('redraw.fixed.headers');
+          }
         }
-      }, 300);
+      });
 
       $resizer.draggable({
         axis: "y",
         start: options.onStart ? options.onStart : function(){},
         drag: function (event, ui) {
-          clearInterval(autoExpandTimeout);
-          var currentHeight = ui.offset.top - 120;
+          autoExpand = false;
+          var currentHeight = ui.offset.top + $rightPanel.scrollTop() - (125 + $execStatus.outerHeight(true));
           $target.css("height", currentHeight + "px");
           ace().resize();
           ui.offset.top = 0;
@@ -1393,6 +1489,7 @@
         stop: function (event, ui) {
           ui.offset.top = 0;
           ui.position.top = 0;
+          $.totalStorage('hue.editor.editor.size', $target.height());
           $(document).trigger("editorSizeChanged");
         }
       });
@@ -1606,7 +1703,33 @@
       }
     },
     update: function (element, valueAccessor, allBindingsAccessor) {
-      $(element).val(ko.unwrap(valueAccessor()));
+      if (!$(element).is(':focus')) {
+        $(element).val(ko.unwrap(valueAccessor()));
+      }
+      if ($(element).val() === '') {
+        $(element).removeClass('x');
+      }
+    }
+  }
+
+  ko.bindingHandlers.blurHide = {
+    init: function (element, valueAccessor) {
+      var $el = $(element);
+      var prop = valueAccessor();
+      $el.on('blur', function () {
+        if ($.trim($el.val()) === '') {
+          if (ko.isObservable(prop)) {
+            prop(false);
+          }
+        }
+      });
+    },
+    update: function (element, valueAccessor) {
+      var $el = $(element);
+      var prop = valueAccessor();
+      if (ko.isObservable(prop) && prop()) {
+        $el.focus();
+      }
     }
   }
 
@@ -1752,6 +1875,12 @@
         return _source;
       }
 
+      if (valueAccessor.nonBindableSource && valueAccessor.displayProperty) {
+        source = ko.utils.arrayMap(valueAccessor.nonBindableSource(), function(item) {
+          return item[valueAccessor.displayProperty]();
+        });
+      }
+
       var _options = {
         source: source,
         onselect: function (val) {
@@ -1873,11 +2002,13 @@
     update: function (element, valueAccessor) {
       var elem = $(element);
       var valueAccessor = valueAccessor();
-      if (typeof valueAccessor.target == "function") {
-        elem.val(valueAccessor.target());
-      }
-      else {
-        elem.val(valueAccessor.target);
+      if (typeof valueAccessor.completeSolrRanges === 'undefined') {
+        if (typeof valueAccessor.target == "function") {
+          elem.val(valueAccessor.target());
+        }
+        else {
+          elem.val(valueAccessor.target);
+        }
       }
       if (valueAccessor.forceUpdateSource) {
         element.typeahead.data('typeahead').source = function () {
@@ -1967,7 +2098,11 @@
         if (options.type == "parameter" && options.update != "") {
           var _found = false;
           allBindingsAccessor().options().forEach(function(opt){
-            if (opt[allBindingsAccessor().optionsValue]() == options.update){
+            var _option = opt[allBindingsAccessor().optionsValue];
+            if (ko.isObservable(_option)){
+              _option = _option();
+            }
+            if (_option == options.update){
               _found = true;
             }
           });
@@ -2081,34 +2216,59 @@
   ko.bindingHandlers.hivechooser = {
     init: function (element, valueAccessor, allBindingsAccessor, vm) {
       var self = $(element);
-      self.val(valueAccessor()());
-
-      function setPathFromAutocomplete(path) {
-        self.val(path);
-        valueAccessor()(path);
-        self.blur();
+      var options = ko.unwrap(valueAccessor());
+      var complexConfiguration = false;
+      if (typeof options === 'function'){
+        self.val(options());
+      }
+      else {
+        if (options.data){
+          self.val(options.data);
+          complexConfiguration = true;
+        }
+        else {
+          self.val(options);
+        }
       }
 
-      self.on("blur", function () {
-        valueAccessor()(self.val());
-      });
-
-      self.jHueGenericAutocomplete({
-        showOnFocus: true,
-        home: "/",
-        onPathChange: function (path) {
-          setPathFromAutocomplete(path);
-        },
-        onEnter: function (el) {
-          setPathFromAutocomplete(el.val());
-        },
-        onBlur: function () {
-          if (self.val().lastIndexOf(".") == self.val().length - 1) {
-            self.val(self.val().substr(0, self.val().length - 1));
-          }
-          valueAccessor()(self.val());
+      if (complexConfiguration) {
+        self.jHueGenericAutocomplete({
+          showOnFocus: true,
+          skipColumns: options.skipColumns,
+          startingPath: options.database + '.',
+          rewriteVal: true,
+          onPathChange: options.onChange,
+          searchEverywhere : options.searchEverywhere || false
+        });
+      }
+      else {
+        function setPathFromAutocomplete(path) {
+          self.val(path);
+          valueAccessor()(path);
+          self.blur();
         }
-      });
+        self.on("blur", function () {
+          valueAccessor()(self.val());
+        });
+        self.jHueGenericAutocomplete({
+          showOnFocus: true,
+          home: "/",
+          skipColumns: allBindingsAccessor().skipColumns || false,
+          onPathChange: function (path) {
+            setPathFromAutocomplete(path);
+          },
+          onEnter: function (el) {
+            setPathFromAutocomplete(el.val());
+          },
+          onBlur: function () {
+            if (self.val().lastIndexOf(".") == self.val().length - 1) {
+              self.val(self.val().substr(0, self.val().length - 1));
+            }
+            valueAccessor()(self.val());
+          }
+        });
+      }
+
     }
   }
 
@@ -2157,8 +2317,7 @@
       self.attr("autocomplete", "off");
       self.jHueHdfsAutocomplete({
         skipKeydownEvents: true,
-        skipScrollEvent: true,
-        zIndex: 990
+        skipScrollEvent: true
       });
     }
   };
@@ -2166,6 +2325,7 @@
   ko.bindingHandlers.filechooser = {
     init: function (element, valueAccessor, allBindingsAccessor, vm) {
       var self = $(element);
+      var options = ko.unwrap(allBindingsAccessor());
       self.attr("autocomplete", "off");
       if (typeof valueAccessor() == "function" || typeof valueAccessor().value == "function") {
         self.val(valueAccessor().value ? valueAccessor().value(): valueAccessor()());
@@ -2192,20 +2352,36 @@
           }
           self.attr("data-original-title", self.data("fullPath"));
         });
+
+        if (options.valueUpdate && options.valueUpdate === 'afterkeydown') {
+          self.on('keyup', function () {
+            if (valueAccessor().value){
+              valueAccessor().value(self.val());
+            }
+            else {
+              valueAccessor()(self.val());
+            }
+          });
+        }
       }
       else {
         self.val(valueAccessor());
         self.on("blur", function () {
           valueAccessor(self.val());
         });
+        if (options.valueUpdate && options.valueUpdate === 'afterkeydown') {
+          self.on('keyup', function () {
+            valueAccessor(self.val());
+          });
+        }
       }
 
-      self.after(getFileBrowseButton(self, true, valueAccessor, true, allBindingsAccessor, valueAccessor().isAddon));
+      self.after(getFileBrowseButton(self, true, valueAccessor, true, allBindingsAccessor, valueAccessor().isAddon, valueAccessor().isNestedModal));
     }
   };
 
 
-  function getFileBrowseButton(inputElement, selectFolder, valueAccessor, stripHdfsPrefix, allBindingsAccessor, isAddon) {
+  function getFileBrowseButton(inputElement, selectFolder, valueAccessor, stripHdfsPrefix, allBindingsAccessor, isAddon, isNestedModal) {
     var _btn;
     if (isAddon) {
       _btn = $("<span>").addClass("add-on muted pointer").text("..");
@@ -2214,16 +2390,18 @@
     }
     _btn.click(function (e) {
       e.preventDefault();
-      $("html").addClass("modal-open");
+      if (!isNestedModal) {
+        $("body").addClass("modal-open");
+      }
       // check if it's a relative path
       callFileChooser();
 
       function callFileChooser() {
         var _initialPath = $.trim(inputElement.val()) != "" ? inputElement.val() : "/";
-        if ((allBindingsAccessor && allBindingsAccessor().filechooserOptions && allBindingsAccessor().filechooserOptions.skipInitialPathIfEmpty && inputElement.val() == "") || (allBindingsAccessor && allBindingsAccessor().filechooserPrefixSeparator)){
+        if ((allBindingsAccessor && allBindingsAccessor().filechooserOptions && allBindingsAccessor().filechooserOptions.skipInitialPathIfEmpty && inputElement.val() == "") || (allBindingsAccessor && allBindingsAccessor().filechooserPrefixSeparator)) {
           _initialPath = "";
         }
-        if (inputElement.data("fullPath")){
+        if (inputElement.data("fullPath")) {
           _initialPath = inputElement.data("fullPath");
         }
         if (_initialPath.indexOf("hdfs://") > -1) {
@@ -2236,13 +2414,17 @@
             handleChoice(filePath, stripHdfsPrefix);
             if (selectFolder) {
               $("#chooseFile").modal("hide");
-              $(".modal-backdrop").remove();
+              if (!isNestedModal) {
+                $(".modal-backdrop").remove();
+              }
             }
           },
           onFileChoose: function (filePath) {
             handleChoice(filePath, stripHdfsPrefix);
             $("#chooseFile").modal("hide");
-            $(".modal-backdrop").remove();
+            if (!isNestedModal) {
+              $(".modal-backdrop").remove();
+            }
           },
           createFolder: allBindingsAccessor && allBindingsAccessor().filechooserOptions && allBindingsAccessor().filechooserOptions.createFolder,
           uploadFile: allBindingsAccessor && allBindingsAccessor().filechooserOptions && allBindingsAccessor().filechooserOptions.uploadFile,
@@ -2254,35 +2436,37 @@
           filterExtensions: allBindingsAccessor && allBindingsAccessor().filechooserFilter ? allBindingsAccessor().filechooserFilter : ""
         });
         $("#chooseFile").modal("show");
-        $("#chooseFile").on("hidden", function(){
-          $("html").removeClass("modal-open");
-          $(".modal-backdrop").remove();
-        });
+        if (!isNestedModal) {
+          $("#chooseFile").on("hidden", function () {
+            $("body").removeClass("modal-open");
+            $(".modal-backdrop").remove();
+          });
+        }
       }
 
       function handleChoice(filePath, stripHdfsPrefix) {
-        if (allBindingsAccessor && allBindingsAccessor().filechooserPrefixSeparator){
+        if (allBindingsAccessor && allBindingsAccessor().filechooserPrefixSeparator) {
           filePath = inputElement.val().split(allBindingsAccessor().filechooserPrefixSeparator)[0] + '=' + filePath;
         }
-        if (allBindingsAccessor && allBindingsAccessor().filechooserOptions && allBindingsAccessor().filechooserOptions.deploymentDir){
+        if (allBindingsAccessor && allBindingsAccessor().filechooserOptions && allBindingsAccessor().filechooserOptions.deploymentDir) {
           inputElement.data("fullPath", filePath);
           inputElement.attr("data-original-title", filePath);
-          if (filePath.indexOf(allBindingsAccessor().filechooserOptions.deploymentDir) == 0){
+          if (filePath.indexOf(allBindingsAccessor().filechooserOptions.deploymentDir) == 0) {
             filePath = filePath.substr(allBindingsAccessor().filechooserOptions.deploymentDir.length + 1);
           }
         }
-        if (stripHdfsPrefix){
+        if (stripHdfsPrefix) {
           inputElement.val(filePath);
         }
         else {
           inputElement.val("hdfs://" + filePath);
         }
         inputElement.change();
-        if (valueAccessor){
+        if (valueAccessor) {
           if (typeof valueAccessor() == "function" || typeof valueAccessor().value == "function") {
-            if (valueAccessor().value){
+            if (valueAccessor().value) {
               valueAccessor().value(inputElement.val());
-              if (valueAccessor().displayJustLastBit){
+              if (valueAccessor().displayJustLastBit) {
                 inputElement.data("fullPath", inputElement.val());
                 inputElement.attr("data-original-title", inputElement.val());
                 var _val = inputElement.val();
@@ -2299,7 +2483,7 @@
         }
       }
     });
-    if (allBindingsAccessor && allBindingsAccessor().filechooserDisabled){
+    if (allBindingsAccessor && allBindingsAccessor().filechooserDisabled) {
       _btn.addClass("disabled").attr("disabled", "disabled");
     }
     return _btn;
@@ -2413,7 +2597,7 @@
       var $el = $(element);
       var options = ko.unwrap(valueAccessor());
       var snippet = options.snippet;
-      var assistHelper = snippet.getAssistHelper();
+      var apiHelper = snippet.getApiHelper();
       var aceOptions = options.aceOptions || {};
 
       $el.text(snippet.statement_raw());
@@ -2427,9 +2611,14 @@
       snippet.errors.subscribe(function(newErrors) {
         editor.clearErrors();
         var offset = 0;
-        if (snippet.isSqlDialect() && editor.getSelectedText()) {
-          var selectionRange = editor.getSelectionRange();
-          offset = Math.min(selectionRange.start.row, selectionRange.end.row);
+        if (snippet.isSqlDialect()) {
+          if (editor.getSelectedText()){
+            var selectionRange = editor.getSelectionRange();
+            offset = Math.min(selectionRange.start.row, selectionRange.end.row);
+          }
+          if (snippet.result && snippet.result.statements_count() > 1){
+            offset = snippet.result.statement_range().start.row;
+          }
         }
         if (newErrors.length > 0) {
           newErrors.forEach(function (err, cnt) {
@@ -2437,6 +2626,9 @@
               editor.addError(err.message, err.line + offset);
               if (cnt == 0) {
                 editor.scrollToLine(err.line + offset, true, true, function () {});
+                if (err.col !== null){
+                  editor.renderer.scrollCursorIntoView({row: err.line + offset, column: err.col + 10}, 0.5)
+                }
               }
             }
           });
@@ -2446,17 +2638,52 @@
       editor.setTheme($.totalStorage("hue.ace.theme") || "ace/theme/hue");
 
       var editorOptions = {
-        enableBasicAutocompletion: true,
         enableSnippets: true,
-        enableLiveAutocompletion: true,
         showGutter: false,
         showLineNumbers: false,
         showPrintMargin: false,
+        scrollPastEnd: true,
         minLines: 1,
         maxLines: 25
       };
 
+      editor.enabledMenuOptions = {
+        setShowInvisibles: true,
+        setTabSize: true,
+        setShowGutter: true
+      };
+
+      editor.customMenuOptions = {
+        setEnableAutocompleter: function (enabled) {
+          editor.setOption('enableBasicAutocompletion', enabled);
+          snippet.getApiHelper().setInTotalStorage('hue.ace', 'enableBasicAutocompletion', enabled);
+          if (enabled && $('#setEnableLiveAutocompletion:checked').length === 0) {
+            $('#setEnableLiveAutocompletion').trigger('click');
+          } else if (!enabled && $('#setEnableLiveAutocompletion:checked').length !== 0) {
+            $('#setEnableLiveAutocompletion').trigger('click');
+          }
+        },
+        getEnableAutocompleter: function () {
+          return editor.getOption('enableBasicAutocompletion');
+        },
+        setEnableLiveAutocompletion: function (enabled) {
+          editor.setOption('enableLiveAutocompletion', enabled);
+          snippet.getApiHelper().setInTotalStorage('hue.ace', 'enableLiveAutocompletion', enabled);
+          if (enabled && $('#setEnableAutocompleter:checked').length === 0) {
+            $('#setEnableAutocompleter').trigger('click');
+          }
+        },
+        getEnableLiveAutocompletion: function () {
+          return editor.getOption('enableLiveAutocompletion');
+        }
+      };
+
       $.extend(editorOptions, aceOptions);
+
+      editorOptions['enableBasicAutocompletion'] = snippet.getApiHelper().getFromTotalStorage('hue.ace', 'enableBasicAutocompletion', true);
+      if (editorOptions['enableBasicAutocompletion']) {
+        editorOptions['enableLiveAutocompletion'] = snippet.getApiHelper().getFromTotalStorage('hue.ace', 'enableLiveAutocompletion', true);
+      }
 
       editor.setOptions(editorOptions);
 
@@ -2467,8 +2694,28 @@
       }
       editor.completer.exactMatch = ! snippet.isSqlDialect();
 
-      var langTools = ace.require("ace/ext/language_tools")
-      langTools.addCompleter(snippet.autocompleter);
+      var initAutocompleters = function () {
+        if (editor.completers) {
+          editor.completers.length = 0;
+          if(! options.useNewAutocompleter) {
+            editor.completers.push(langTools.snippetCompleter);
+            editor.completers.push(langTools.textCompleter);
+            editor.completers.push(langTools.keyWordCompleter);
+          }
+          editor.completers.push(snippet.autocompleter);
+        }
+      };
+
+      var langTools = ace.require("ace/ext/language_tools");
+      langTools.textCompleter.setSqlMode(snippet.isSqlDialect());
+
+      editor.on("focus", initAutocompleters);
+      initAutocompleters();
+
+      var removeUnicodes = function (value) {
+        var UNICODES_TO_REMOVE = /[\u1680\u180E\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u202F\u205F\u3000\uFEFF]/ig;  //taken from https://www.cs.tut.fi/~jkorpela/chars/spaces.html
+        return value.replace(UNICODES_TO_REMOVE, ' ');
+      };
 
       var placeHolderElement = null;
       var placeHolderVisible = false;
@@ -2493,7 +2740,15 @@
           placeHolderVisible = false;
         }
         if (options.updateOnInput){
-          snippet.statement_raw(editor.getValue());
+
+          snippet.statement_raw(removeUnicodes(editor.getValue()));
+        }
+        if (editor.session.$backMarkers) {
+          for (var marker in editor.session.$backMarkers) {
+            if (editor.session.$backMarkers[marker].clazz === 'highlighted') {
+              editor.session.removeMarker(editor.session.$backMarkers[marker].id);
+            }
+          }
         }
       });
 
@@ -2509,9 +2764,9 @@
 
       editor.on("blur", function () {
         snippet.inFocus(false);
-        snippet.statement_raw(editor.getValue());
+        snippet.statement_raw(removeUnicodes(editor.getValue()));
         if (options.onBlur) {
-          options.onBlur($el, editor.getValue());
+          options.onBlur($el, removeUnicodes(editor.getValue()));
         }
       });
 
@@ -2520,7 +2775,7 @@
       var refreshTables = function() {
         currentAssistTables = {};
         if (snippet.database()) {
-          assistHelper.fetchTables({
+          apiHelper.fetchTables({
             sourceType: snippet.type(),
             databaseName: snippet.database(),
             successCallback: function(data) {
@@ -2662,10 +2917,11 @@
           };
 
           this.onClick = function (e) {
-            if (this.link && (e.altKey || e.metaKey || e.ctrlKey)) {
+            if (this.link && e.shiftKey) {
               this.link.editor = this.editor;
+              this.editor.session.selection.clearSelection();
               this._signal("open", this.link);
-              this.clear()
+              this.clear();
             }
           };
 
@@ -2702,15 +2958,12 @@
       editor.hueLink.on("open", function (token) {
         if (token.value === " * " && token.columns.length > 0) {
           editor.session.replace(token.range, token.columns.join(", "))
-        }
-        else if (token.value.indexOf("'/") == 0 && token.value.lastIndexOf("'") == token.value.length - 1) {
-          window.open("/filebrowser/#" + token.value.replace(/'/gi, ""));
-        }
-        else if (token.value.indexOf("\"/") == 0 && token.value.lastIndexOf("\"") == token.value.length - 1) {
-          window.open("/filebrowser/#" + token.value.replace(/\"/gi, ""));
-        }
-        else {
-          window.open("/metastore/table/" + snippet.database() + "/" + token.value);
+        } else if (token.value.indexOf("'/") == 0 && token.value.lastIndexOf("'") == token.value.length - 1) {
+          window.open("/filebrowser/#" + token.value.replace(/'/gi, ""), '_blank');
+        } else if (token.value.indexOf("\"/") == 0 && token.value.lastIndexOf("\"") == token.value.length - 1) {
+          window.open("/filebrowser/#" + token.value.replace(/\"/gi, ""), '_blank');
+        } else {
+          window.open("/metastore/table/" + snippet.database() + "/" + token.value, '_blank');
         }
       });
 
@@ -2739,7 +2992,7 @@
       });
 
       editor.on("change", function (e) {
-        snippet.statement_raw(editor.getValue());
+        snippet.statement_raw(removeUnicodes(editor.getValue()));
         editor.clearErrors();
         editor.session.getMode().$id = snippet.getAceMode();
         var currentSize = editor.session.getLength();
@@ -2769,8 +3022,24 @@
         name: "execute",
         bindKey: {win: "Ctrl-Enter", mac: "Command-Enter|Ctrl-Enter"},
         exec: function () {
-          snippet.statement_raw(editor.getValue());
+          snippet.statement_raw(removeUnicodes(editor.getValue()));
           snippet.execute();
+        }
+      });
+
+      editor.commands.addCommand({
+        name: "new",
+        bindKey: {win: "Ctrl-e", mac: "Command-e|Ctrl-e"},
+        exec: function () {
+          huePubSub.publish('editor.create.new');
+        }
+      });
+
+      editor.commands.addCommand({
+        name: "save",
+        bindKey: {win: "Ctrl-s", mac: "Command-s|Ctrl-s"},
+        exec: function () {
+          huePubSub.publish('editor.save');
         }
       });
 
@@ -2785,11 +3054,17 @@
               }
               else {
                 editor.setValue(vkbeautify.sql(editor.getValue(), 2), 1);
-                snippet.statement_raw(editor.getValue());
+                snippet.statement_raw(removeUnicodes(editor.getValue()));
               }
             }
           }
         }
+      });
+
+      editor.commands.addCommand({
+        name: "gotolinealternetive",
+        bindKey: {win: "Ctrl-j", mac: "Command-j|Ctrl-j"},
+        exec: editor.commands.commands['gotoline'].exec
       });
 
       huePubSub.subscribe("assist.dblClickDbItem", function(assistDbEntry) {
@@ -2813,6 +3088,69 @@
         }
       });
 
+      var $tableDropMenu = $el.next('.table-drop-menu');
+      var $identifierDropMenu = $tableDropMenu.find('.editor-drop-identifier')
+
+
+      var hideDropMenu = function () {
+        $tableDropMenu.css('opacity', 0);
+        window.setTimeout(function () {
+          $tableDropMenu.hide();
+        }, 300);
+      };
+
+      $(document).click(function (event) {
+        if ($tableDropMenu.find($(event.target)).length === 0) {
+          hideDropMenu();
+        };
+      });
+
+      var lastMeta = {};
+      huePubSub.subscribe('draggable.text.meta', function (meta) {
+        lastMeta = meta;
+        if (typeof meta !== 'undefined' && typeof meta.table !== 'undefined') {
+          $identifierDropMenu.text(meta.table)
+        }
+      });
+
+      var menu = ko.bindingHandlers.contextMenu.initContextMenu($tableDropMenu, $('.right-panel'));
+
+      var setFromDropMenu = function (text) {
+        var before = editor.getTextBeforeCursor();
+        if (/\S+$/.test(before)) {
+          text = " " + text;
+        }
+        editor.session.insert(editor.getCursorPosition(), text);
+        menu.hide();
+        editor.focus();
+      };
+
+      $tableDropMenu.find('.editor-drop-value').click(function () {
+        setFromDropMenu(lastMeta.table);
+      });
+
+      $tableDropMenu.find('.editor-drop-select').click(function () {
+        setFromDropMenu('SELECT * FROM ' + lastMeta.table + ';');
+        $tableDropMenu.hide();
+      });
+
+      $tableDropMenu.find('.editor-drop-insert').click(function () {
+        setFromDropMenu('INSERT INTO ' + lastMeta.table + ' VALUES ();');
+      });
+
+      $tableDropMenu.find('.editor-drop-update').click(function () {
+        setFromDropMenu('UPDATE ' + lastMeta.table + ' SET ');
+      });
+
+      $tableDropMenu.find('.editor-drop-delete').click(function () {
+        setFromDropMenu('DELETE FROM ' + lastMeta.table + ' WHERE ');
+      });
+
+      var draggableMeta = {};
+      huePubSub.subscribe('draggable.text.meta', function (meta) {
+        draggableMeta = meta;
+      });
+
       $el.droppable({
         accept: ".draggableText",
         drop: function (e, ui) {
@@ -2820,31 +3158,30 @@
           var text = ui.helper.text();
           editor.moveCursorToPosition(position);
           var before = editor.getTextBeforeCursor();
-          if (before.length > 0 && before.charAt(before.length - 1) !== ' ' && before.charAt(before.length - 1) !== '.') {
-            text = " " + text;
+          if (draggableMeta.table && ! draggableMeta.column && /.*;|^\s*$/.test(before)) {
+            menu.show(event);
+          } else {
+            if (/\S+$/.test(before) && before.charAt(before.length - 1) !== '.') {
+              text = " " + text;
+            }
+            var after = editor.getTextAfterCursor();
+            if (after.length > 0 && after.charAt(0) !== ' ' && text.charAt(text.length - 1) !== ' ') {
+              text += " ";
+            }
+            editor.session.insert(position, text);
+            position.column += text.length;
+            editor.clearSelection();
           }
-          var after = editor.getTextAfterCursor();
-          if (after.length > 0 && after.charAt(0) !== ' ' && text.charAt(text.length - 1) !== ' ') {
-            text += " ";
-          }
-          editor.session.insert(position, text);
-          position.column += text.length;
-          editor.clearSelection();
         }
       });
 
+      var autocompleteTemporarilyDisabled = false;
       editor.commands.on("afterExec", function (e) {
-        if (e.command.name === "insertstring") {
-          var triggerAutocomplete = ((editor.session.getMode().$id == "ace/mode/hive" || editor.session.getMode().$id == "ace/mode/impala") && (e.args == "." || e.args == " ")) || /["']\/[^\/]*/.test(editor.getTextBeforeCursor());
-          if(e.args.toLowerCase().indexOf("? from ") == 0) {
-            if (e.args[e.args.length - 1] !== '.') {
-              editor.moveCursorTo(editor.getCursorPosition().row, editor.getCursorPosition().column - e.args.length + 1);
-              editor.removeTextBeforeCursor(1);
-            }
-            triggerAutocomplete = true;
-          }
-
-          if (triggerAutocomplete) {
+        if (editor.getOption('enableLiveAutocompletion') && e.command.name === "insertstring") {
+          var questionMarkMatch = editor.getTextBeforeCursor().match(/select \? from \S+[^.]$/i);
+          if (questionMarkMatch) {
+            editor.moveCursorTo(editor.getCursorPosition().row, editor.getCursorPosition().column - questionMarkMatch[0].length + 8);
+            editor.removeTextBeforeCursor(1);
             window.setTimeout(function () {
               editor.execCommand("startAutocomplete");
             }, 1);
@@ -2852,11 +3189,14 @@
         }
         editor.session.getMode().$id = snippet.getAceMode(); // forces the id again because of Ace command internals
         // if it's pig and before it's LOAD ' we disable the autocomplete and show a filechooser btn
-        if (editor.session.getMode().$id = "ace/mode/pig" && e.args) {
+        if (editor.session.getMode().$id === "ace/mode/pig" && e.args) {
           var textBefore = editor.getTextBeforeCursor();
           if ((e.args == "'" && textBefore.toUpperCase().indexOf("LOAD ") > -1 && textBefore.toUpperCase().indexOf("LOAD ") == textBefore.toUpperCase().length - 5)
               || textBefore.toUpperCase().indexOf("LOAD '") > -1 && textBefore.toUpperCase().indexOf("LOAD '") == textBefore.toUpperCase().length - 6) {
-            editor.disableAutocomplete();
+            if (editor.getOption('enableBasicAutocompletion')) {
+              editor.disableAutocomplete();
+              autocompleteTemporarilyDisabled = true;
+            }
             var btn = editor.showFileButton();
             btn.on("click", function (ie) {
               ie.preventDefault();
@@ -2870,7 +3210,10 @@
                 onFileChoose: function (filePath) {
                   editor.session.insert(editor.getCursorPosition(), filePath + "'");
                   editor.hideFileButton();
-                  editor.enableAutocomplete();
+                  if (autocompleteTemporarilyDisabled) {
+                    editor.enableAutocomplete();
+                    autocompleteTemporarilyDisabled = false;
+                  }
                   $(".ace-filechooser").hide();
                 },
                 selectFolder: false,
@@ -2878,14 +3221,19 @@
               });
               $(".ace-filechooser").css({ "top": $(ie.currentTarget).position().top, "left": $(ie.currentTarget).position().left}).show();
             });
-          }
-          else {
+          } else {
             editor.hideFileButton();
-            editor.enableAutocomplete();
+            if (autocompleteTemporarilyDisabled) {
+              editor.enableAutocomplete();
+              autocompleteTemporarilyDisabled = false;
+            }
           }
           if (e.args != "'" && textBefore.toUpperCase().indexOf("LOAD '") > -1 && textBefore.toUpperCase().indexOf("LOAD '") == textBefore.toUpperCase().length - 6) {
             editor.hideFileButton();
-            editor.enableAutocomplete();
+            if (autocompleteTemporarilyDisabled) {
+              editor.enableAutocomplete();
+              autocompleteTemporarilyDisabled = false;
+            }
           }
         }
       });
@@ -2899,7 +3247,36 @@
       var snippet = options.snippet;
       if (snippet.ace()) {
         var editor = snippet.ace();
+        var range = options.highlightedRange ? options.highlightedRange() : null;
         editor.session.setMode(snippet.getAceMode());
+        if (range) {
+          var conflictingWithErrorMarkers = false;
+          if (editor.session.$backMarkers) {
+            for (var marker in editor.session.$backMarkers) {
+              if (editor.session.$backMarkers[marker].clazz === 'ace_error-line') {
+                var errorRange = editor.session.$backMarkers[marker].range;
+                if (range.start.row <= errorRange.end.row && range.end.row >= errorRange.start.row) {
+                  conflictingWithErrorMarkers = true;
+                }
+              }
+              if (editor.session.$backMarkers[marker].clazz === 'highlighted') {
+                editor.session.removeMarker(editor.session.$backMarkers[marker].id);
+              }
+            }
+          }
+          if (!conflictingWithErrorMarkers) {
+            editor.session.addMarker(new AceRange(range.start.row, range.start.column, range.end.row, range.end.column), 'highlighted', 'line');
+            ace.require('ace/lib/dom').importCssString('.highlighted {\
+                background-color: #E3F7FF;\
+                position: absolute;\
+            }');
+            editor.scrollToLine(range.start.row, true, true, function () {});
+          }
+        }
+        try {
+          editor._emit('change')
+        }
+        catch (e){}
       }
     }
   };
@@ -3062,7 +3439,7 @@
             return false;
           }
         });
-      }
+      };
 
       if ($parentFVOwnerElement.data('disposalFunction')) {
         $parentFVOwnerElement.data('disposalFunction')();
@@ -3104,6 +3481,40 @@
         endIndex = allEntries.length - 1;
       }
 
+      var huePubSubs = [];
+
+      var scrollToIndex = function (idx, offset) {
+        var lastKnownHeights = $parentFVOwnerElement.data('lastKnownHeights');
+        if (! lastKnownHeights) {
+          return;
+        }
+        var top = 0;
+        for (var i = 0; i < idx; i++) {
+          top += lastKnownHeights[i];
+        }
+        $container.scrollTop(top + offset);
+      };
+
+      huePubSubs.push(huePubSub.subscribe('assist.db.scrollToHighlight', function () {
+        var foundIndex;
+        $.each(allEntries, function (idx, entry) {
+          if ((typeof entry.highlight !== 'undefined' && entry.highlight() || (typeof entry.highlightParent !== 'undefined' && entry.highlightParent()))) {
+            foundIndex = idx;
+            window.setTimeout(function () {
+              entry.highlight(false);
+              entry.highlightParent(false);
+            }, 500); // 500 for animation effect
+            return false;
+          }
+        });
+        if (foundIndex) {
+          var offset = depth > 0 ? $container.scrollTop() : 0;
+          window.setTimeout(function () {
+            scrollToIndex(foundIndex, offset);
+          }, 0);
+        }
+      }));
+
       var childBindingContext = bindingContext.createChildContext(
           bindingContext.$rawData,
           null,
@@ -3130,32 +3541,20 @@
           'width': '100%'
         }).appendTo($wrapper);
 
-        $container.perfectScrollbar({
-          minScrollbarLength: options.minScrollbarLength || 20,
-          suppressScrollX: options.suppressScrollX || true,
-          scrollYFixedTop: options.scrollYFixedTop ? (typeof options.scrollYFixedTop == 'boolean' ? $container.position().top : options.scrollYFixedTop) : null
-        });
-        $container.on('ps-scroll-x', function () {
-          $(element).trigger('scroll');
-        });
-        $container.on('ps-scroll-y', function () {
-          $(element).trigger('scroll');
+        $container.niceScroll({
+          cursorcolor: "#CCC",
+          cursorborder: "1px solid #CCC",
+          cursoropacitymin: 0,
+          cursoropacitymax: 0.75,
+          scrollspeed: 100,
+          mousescrollstep: 60,
+          cursorminheight: options.cursorminheight || 20,
+          horizrailenabled: options.horizrailenabled || false
         });
       }
       else {
         window.setTimeout(function(){
-          $container.perfectScrollbar('destroy');
-          $container.perfectScrollbar({
-            minScrollbarLength: options.minScrollbarLength || 20,
-            suppressScrollX: options.suppressScrollX || true,
-            scrollYFixedTop: options.scrollYFixedTop ? (typeof options.scrollYFixedTop == 'boolean' ? $container.position().top : options.scrollYFixedTop) : null
-          });
-          $container.on('ps-scroll-x', function () {
-            $(element).trigger('scroll');
-          });
-          $container.on('ps-scroll-y', function () {
-            $(element).trigger('scroll');
-          });
+          $container.getNiceScroll().resize();
         }, 200);
       }
 
@@ -3178,7 +3577,7 @@
           totalHeight += height;
         });
         $wrapper.height(totalHeight + 'px');
-        $container.perfectScrollbar('update');
+        $container.getNiceScroll().resize();
       };
       resizeWrapper();
 
@@ -3197,7 +3596,7 @@
           // TODO: Figure out why it goes over index at the end scroll position
           if (startIndex + idx < lastKnownHeights.length) {
             var renderedHeight = $(renderedElement).outerHeight(true);
-            if (lastKnownHeights[startIndex + idx] !== renderedHeight) {
+            if (renderedHeight > 5 && lastKnownHeights[startIndex + idx] !== renderedHeight) {
               lastKnownHeights[startIndex + idx] = renderedHeight;
               diff = true;
             }
@@ -3212,14 +3611,14 @@
 
       var updateHeightsInterval = window.setInterval(updateLastKnownHeights, 600);
 
-      huePubSub.subscribe('foreach.visible.update.heights', function (targetId) {
+      huePubSubs.push(huePubSub.subscribe('foreach.visible.update.heights', function (targetId) {
         if (targetId === id) {
           clearInterval(updateHeightsInterval);
           updateLastKnownHeights();
           huePubSub.publish('foreach.visible.update.heights', parentId);
           updateHeightsInterval = window.setInterval(updateLastKnownHeights, 600);
         }
-      });
+      }));
 
       updateLastKnownHeights();
 
@@ -3328,7 +3727,7 @@
         if (startIndex > incrementLimit && Math.abs(lastScrollTop - $container.scrollTop()) < (incrementLimit * options.minHeight)) {
           return;
         }
-        lastScrollTop = $container.scrollTop();;
+        lastScrollTop = $container.scrollTop();
         setStartAndEndFromScrollTop();
         clearTimeout(renderThrottle);
         if (Math.abs($parentFVOwnerElement.data('startIndex') - startIndex) > incrementLimit ||
@@ -3337,13 +3736,13 @@
         }
       };
 
-      huePubSub.subscribe('foreach.visible.update', function (callerId) {
+      huePubSubs.push(huePubSub.subscribe('foreach.visible.update', function (callerId) {
         if (callerId === id && endIndex > 0) {
           setStartAndEndFromScrollTop();
           clearTimeout(renderThrottle);
           renderThrottle = setTimeout(render, 0);
         }
-      });
+      }));
 
       $container.bind('scroll', onScroll);
 
@@ -3351,15 +3750,15 @@
         setTimeout(function () {
           huePubSub.publish('foreach.visible.update.heights', parentId);
         }, 0);
+        huePubSubs.forEach(function (pubSub) {
+          pubSub.remove();
+        });
         $container.unbind('scroll', onScroll);
         clearInterval(updateCountInterval);
         clearInterval(updateHeightsInterval);
         $parentFVOwnerElement.data('disposalFunction', null);
       });
 
-      ko.utils.domNodeDisposal.addDisposeCallback($wrapper[0], function () {
-        $container.perfectScrollbar('destroy')
-      });
       ko.utils.domNodeDisposal.addDisposeCallback($wrapper[0], $parentFVOwnerElement.data('disposalFunction'));
 
       setStartAndEndFromScrollTop();
@@ -3385,6 +3784,7 @@
         considerStretching = valueAccessor().considerStretching || false,
         itemHeight = valueAccessor().itemHeight || 22,
         scrollable = valueAccessor().scrollable || 'body',
+        scrollUp = valueAccessor().scrollUp || false,
         scrollableOffset = valueAccessor().scrollableOffset || 0,
         disableHueEachRowCount = valueAccessor().disableHueEachRowCount || 0,
         forceRenderSub = valueAccessor().forceRenderSub || null,
@@ -3475,7 +3875,12 @@
 
 
       $parent.parents(scrollable).off('scroll');
+      huePubSub.publish('scrollable.scroll.off', scrollable);
+
       $parent.parents(scrollable).on('scroll', render);
+      if (scrollUp){
+        $parent.parents(scrollable).jHueScrollUp();
+      }
 
       if ($parent.parents('.hueach').length > 0) {
         window.setTimeout(render, 100);
@@ -3506,28 +3911,277 @@
     }
   };
 
-  ko.bindingHandlers.floatlabel = {
-    init: function (element, valueAccessor, allBindings) {
-      $(element).floatlabel();
-    }
-  };
-
-  ko.bindingHandlers.perfectScrollbar = {
+  ko.bindingHandlers.niceScroll = {
     init: function (element, valueAccessor, allBindings) {
       var options = valueAccessor() || {};
       if (typeof options.enable === 'undefined' || options.enable) {
-        $(element).perfectScrollbar({
-          minScrollbarLength: options.minScrollbarLength || 20,
-          suppressScrollX: options.suppressScrollX || true
+        $(element).niceScroll({
+          cursorcolor: "#CCC",
+          cursorborder: "1px solid #CCC",
+          cursoropacitymin: 0,
+          cursoropacitymax: 0.75,
+          mousescrollstep: 60,
+          cursorminheight: options.cursorminheight || 20,
+          horizrailenabled: options.horizrailenabled || true
         });
-        $(element).on('ps-scroll-x', function () {
-          $(element).trigger('scroll');
-        });
-        $(element).on('ps-scroll-y', function () {
-          $(element).trigger('scroll');
+        $(element).addClass('nicescrollified');
+      }
+    }
+  };
+
+
+  ko.bindingHandlers.plotly = {
+    init: function (element, valueAccessor, allBindings) {
+      var options = valueAccessor() || {};
+      if (Plotly){
+        Plotly.plot(element, options.data || [], options.layout || {}, {displaylogo: false});
+      }
+    }
+  };
+
+  ko.bindingHandlers.dockable = {
+    init: function (element, valueAccessor, allBindings) {
+      var options = valueAccessor() || {};
+      var scrollable = options.scrollable ? options.scrollable : window;
+
+      $(element).addClass('dockable');
+
+      var initialTopPosition = -1;
+      var initialSize = {
+        w: $(element).width(),
+        h: $(element).outerHeight() + (options.jumpCorrection || 0)
+      };
+
+      var ghost = $('<div>').css({'display': 'none', 'height': initialSize.h}).insertBefore($(element));
+
+      function dock() {
+        if (initialTopPosition == -1) {
+          initialTopPosition = $(element).position().top;
+        }
+        if ($(scrollable).scrollTop() > initialTopPosition) {
+          $(element).css({
+            'position': 'fixed',
+            'top': '82px',
+            'width': initialSize.w + 'px'
+          });
+          ghost.show();
+        }
+        else {
+          $(element).removeAttr('style');
+          ghost.hide();
+        }
+      }
+
+      if (options.nicescroll) {
+        var checkForNicescrollInit = -1;
+        checkForNicescrollInit = window.setInterval(function () {
+          if ($(scrollable).hasClass('nicescrollified')) {
+            window.clearTimeout(checkForNicescrollInit);
+            $(scrollable).on('scroll', dock);
+          }
+        }, 200);
+      }
+      else {
+        $(scrollable).on('scroll', dock);
+      }
+
+      huePubSub.subscribe('scrollable.scroll.off', function (scrollElement) {
+        if (scrollElement === scrollable) {
+          $(scrollable).on('scroll', dock);
+        }
+      });
+
+    }
+  };
+
+  ko.bindingHandlers.autogrowInput = {
+    init: function (element, valueAccessor, allBindingsAccessor, viewModel) {
+      var o = $.extend({
+        minWidth: 0,
+        maxWidth: 1000,
+        comfortZone: 70
+      }, valueAccessor());
+      var minWidth = o.minWidth || $(element).width(),
+        val = '',
+        input = $(element),
+        testSubject = $('<tester/>').css({
+          position: 'absolute',
+          top: -9999,
+          left: -9999,
+          width: 'auto',
+          fontSize: input.css('fontSize'),
+          fontFamily: input.css('fontFamily'),
+          fontWeight: input.css('fontWeight'),
+          letterSpacing: input.css('letterSpacing'),
+          whiteSpace: 'nowrap'
+        }),
+        check = function () {
+          if (val === (val = input.val())) {
+            return;
+          }
+          var escaped = val.replace(/&/g, '&amp;').replace(/\s/g, ' ').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          testSubject.html(escaped);
+          var testerWidth = testSubject.width(),
+            newWidth = (testerWidth + o.comfortZone) >= minWidth ? testerWidth + o.comfortZone : minWidth,
+            currentWidth = input.width(),
+            isValidWidthChange = (newWidth < currentWidth && newWidth >= minWidth) || (newWidth > minWidth && newWidth < o.maxWidth);
+          if (isValidWidthChange) {
+            input.width(newWidth);
+          }
+        };
+      testSubject.insertAfter(element);
+      ko.utils.registerEventHandler(element, 'keyup keydown blur update', check);
+    }
+  };
+
+  ko.bindingHandlers.highlight = {
+    update: function (element, valueAccessor, allBindingsAccessor) {
+      var value = ko.unwrap(valueAccessor());
+      var options = ko.unwrap(allBindingsAccessor());
+
+      if (typeof value !== 'undefined') { // allows highlighting static code
+        ace.require([
+          'ace/mode/impala_highlight_rules',
+          'ace/mode/hive_highlight_rules',
+          'ace/tokenizer',
+          'ace/layer/text'
+        ], function (impalaRules, hiveRules, tokenizer, text) {
+          var res = [];
+
+          var Tokenizer = tokenizer.Tokenizer;
+          var Rules;
+          if (options.flavor() == 'impala') {
+            Rules = impalaRules.ImpalaHighlightRules;
+          } else {
+            Rules = hiveRules.HiveHighlightRules;
+          }
+          var Text = text.Text;
+
+          var tok = new Tokenizer(new Rules().getRules());
+          var lines = value.split('\n');
+
+          lines.forEach(function (line) {
+            var renderedTokens = [];
+            var tokens = tok.getLineTokens(line);
+
+            if (tokens && tokens.tokens.length) {
+              try {
+                new Text(document.createElement('div')).$renderSimpleLine(renderedTokens, tokens.tokens);
+              }
+              catch (e) {
+                if (console && console.warn) {
+                  console.warn(line, 'This line has some parsing errors and it has been skipped.');
+                }
+              }
+            }
+
+            res.push('<div class="ace_line pull-left">' + renderedTokens.join('') + '&nbsp;</div>');
+          })
+
+          element.innerHTML = '<div class="ace_editor ace-hue"><div class="ace_layer" style="position: static;">' + res.join('') + '</div></div>';
         });
       }
     }
   };
+
+  ko.bindingHandlers.ellipsis = {
+    update: function (element, valueAccessor, allBindingsAccessor) {
+      var value = ko.unwrap(valueAccessor());
+      var $element = $(element);
+      var chopLength = value.length ? value.length : 30;
+      var text = typeof value === 'object' ? value.data : value;
+      if (text.length > chopLength) {
+        $element.attr('title', text);
+        $element.text(text.substr(0, chopLength) + '...');
+      }
+      else {
+        $element.text(text);
+      }
+    }
+  };
+
+  ko.bindingHandlers.select2Version4 = {
+    init: function (el, valueAccessor, allBindingsAccessor, viewModel) {
+      ko.utils.domNodeDisposal.addDisposeCallback(el, function () {
+        $(el).select2('destroy');
+      });
+
+      var allBindings = allBindingsAccessor(),
+        select2 = ko.utils.unwrapObservable(allBindings.select2Version4);
+
+      $(el).select2(select2);
+    },
+    update: function (el, valueAccessor, allBindingsAccessor, viewModel) {
+      var allBindings = allBindingsAccessor();
+
+      if ("value" in allBindings) {
+        if ((allBindings.select2Version4.multiple || el.multiple) && allBindings.value().constructor != Array) {
+          $(el).val(allBindings.value().split(',')).trigger('change');
+        }
+        else {
+          $(el).val(allBindings.value()).trigger('change');
+        }
+      } else if ("selectedOptions" in allBindings) {
+        var converted = [];
+        var textAccessor = function (value) {
+          return value;
+        };
+        if ("optionsText" in allBindings) {
+          textAccessor = function (value) {
+            var valueAccessor = function (item) {
+              return item;
+            }
+            if ("optionsValue" in allBindings) {
+              valueAccessor = function (item) {
+                return item[allBindings.optionsValue];
+              }
+            }
+            var items = $.grep(allBindings.options(), function (e) {
+              return valueAccessor(e) == value
+            });
+            if (items.length == 0 || items.length > 1) {
+              return "UNKNOWN";
+            }
+            return items[0][allBindings.optionsText];
+          }
+        }
+        $.each(allBindings.selectedOptions(), function (key, value) {
+          converted.push({id: value, text: textAccessor(value)});
+        });
+        $(el).select2("data", converted);
+      }
+    }
+  };
+
+
+  ko.bindingHandlers.momentFromNow = {
+    update: function (element, valueAccessor) {
+      var options = ko.unwrap(valueAccessor());
+      var $element = $(element);
+
+      var value = typeof options.data === 'function' ? options.data() : options.data;
+
+      function render() {
+        $element.text(moment(value).fromNow());
+        if (options.titleFormat) {
+          $element.attr('title', moment(value).format(options.titleFormat));
+        }
+      }
+
+      render();
+
+      if (options.interval) {
+        window.clearInterval($element.data('momentInterval'));
+        $element.data('momentInterval', window.setInterval(render, options.interval));
+      }
+    }
+  };
+
+
+  ko.bindingHandlers.attachViewModelToElementData = {
+    init: function (el, valueAccessor, allBindingsAccessor, viewModel) {
+      $(el).data('__ko_vm', viewModel);
+    }
+  }
 
 }));
